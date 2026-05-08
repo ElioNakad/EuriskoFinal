@@ -29,4 +29,8 @@ export class UsersService {
       email: email.toLowerCase(),
     });
   }
+
+  async findById(userId: string) {
+    return this.userModel.findById(userId);
+  }
 }
