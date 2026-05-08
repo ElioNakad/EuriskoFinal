@@ -31,4 +31,22 @@ export class MailService {
       });
     }
   }
+
+  async sendPaymentSuccess(email: string, amount: number): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: process.env.EMAIL,
+        to: email,
+        subject: 'Wallet Payment Successful',
+        text: `Your wallet payment was completed successfully with the amount of $${amount}.`,
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Failed to send payment success email',
+        {
+          cause: error,
+        },
+      );
+    }
+  }
 }

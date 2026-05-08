@@ -10,7 +10,7 @@ import * as bcrypt from 'bcrypt';
 import { MailService } from '../mail/mail.service';
 import { RedisService } from '../redis/redis.service';
 import { UsersService } from '../users/users.service';
-
+import { WalletsService } from '../wallets/wallets.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SetPasswordDto } from './dto/set-password.dto';
@@ -31,6 +31,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly mailService: MailService,
     private readonly jwtService: JwtService,
+    private readonly walletService: WalletsService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -174,9 +175,11 @@ export class AuthService {
 
     const accessToken = await this.jwtService.signAsync(payload);
 
+    const hasWallet = await this.walletService.hasWallet(user._id.toString());
     return {
       message: 'Login successful',
       accessToken,
+      requiresWalletFunding: !hasWallet,
       user: {
         id: user._id,
         fullName: user.fullName,
