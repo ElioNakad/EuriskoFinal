@@ -1,6 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import Redis from 'ioredis';
 
+type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: JsonValue }
+  | JsonValue[];
+
 @Injectable()
 export class RedisService {
   private readonly redis: Redis;
@@ -12,21 +20,21 @@ export class RedisService {
     });
   }
 
-  async set(key: string, value: unknown, ttl: number) {
+  async set(key: string, value: unknown, ttl: number): Promise<void> {
     await this.redis.set(key, JSON.stringify(value), 'EX', ttl);
   }
 
-  async get(key: string) {
+  async get(key: string): Promise<JsonValue> {
     const data = await this.redis.get(key);
 
     if (!data) {
       return null;
     }
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
-    return JSON.parse(data);
+
+    return JSON.parse(data) as JsonValue;
   }
 
-  async delete(key: string) {
+  async delete(key: string): Promise<void> {
     await this.redis.del(key);
   }
 }
