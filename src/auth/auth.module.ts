@@ -5,9 +5,10 @@ import { AuthService } from './auth.service';
 
 import { RedisModule } from '../redis/redis.module';
 import { UsersModule } from '../users/users.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
-  imports: [RedisModule, UsersModule],
+  imports: [RedisModule, UsersModule, MailModule],
   controllers: [AuthController],
   providers: [AuthService],
 })

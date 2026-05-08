@@ -8,12 +8,13 @@ import { UsersService } from '../users/users.service';
 import { RegisterDto } from './dto/register.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { SetPasswordDto } from './dto/set-password.dto';
-
+import { MailService } from '../mail/mail.service';
 @Injectable()
 export class AuthService {
   constructor(
     private readonly redisService: RedisService,
     private readonly usersService: UsersService,
+    private readonly mailService: MailService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -43,6 +44,7 @@ export class AuthService {
       600,
     );
 
+    await this.mailService.sendOtp(dto.email, otp);
     console.log('OTP:', otp);
 
     return {
