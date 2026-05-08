@@ -1,20 +1,36 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 
 import * as bcrypt from 'bcrypt';
 
+import { MailService } from '../mail/mail.service';
 import { RedisService } from '../redis/redis.service';
 import { UsersService } from '../users/users.service';
 
+import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
-import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { SetPasswordDto } from './dto/set-password.dto';
-import { MailService } from '../mail/mail.service';
+import { VerifyOtpDto } from './dto/verify-otp.dto';
+
+interface SignupData {
+  fullName: string;
+  email: string;
+  nationalId: string;
+  dateOfBirth: string;
+  otp: string;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
     private readonly redisService: RedisService,
     private readonly usersService: UsersService,
     private readonly mailService: MailService,
+    private readonly jwtService: JwtService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -53,16 +69,14 @@ export class AuthService {
   }
 
   async verifyOtp(dto: VerifyOtpDto) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const signupData = await this.redisService.get(
+    const signupData: unknown = await this.redisService.get(
       `signup:${dto.email.toLowerCase()}`,
     );
 
-    if (!signupData) {
+    if (!this.isSignupData(signupData)) {
       throw new BadRequestException('OTP expired or signup not found');
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     if (signupData.otp !== dto.otp) {
       throw new BadRequestException('Invalid OTP');
     }
@@ -81,25 +95,20 @@ export class AuthService {
   }
 
   async setPassword(dto: SetPasswordDto) {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const verifiedData = await this.redisService.get(
+    const verifiedData: unknown = await this.redisService.get(
       `verified:${dto.email.toLowerCase()}`,
     );
 
-    if (!verifiedData) {
+    if (!this.isSignupData(verifiedData)) {
       throw new BadRequestException('Verification expired');
     }
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const user = await this.usersService.create({
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       fullName: verifiedData.fullName,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       email: verifiedData.email,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access
       nationalId: verifiedData.nationalId,
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       dateOfBirth: new Date(verifiedData.dateOfBirth),
       password: hashedPassword,
     });
@@ -128,6 +137,51 @@ export class AuthService {
 
     return age;
   }
+
+  private isSignupData(value: unknown): value is SignupData {
+    if (!value || typeof value !== 'object') {
+      return false;
+    }
+
+    const data = value as Record<keyof SignupData, unknown>;
+
+    return (
+      typeof data.fullName === 'string' &&
+      typeof data.email === 'string' &&
+      typeof data.nationalId === 'string' &&
+      typeof data.dateOfBirth === 'string' &&
+      typeof data.otp === 'string'
+    );
+  }
+
+  async login(dto: LoginDto) {
+    const user = await this.usersService.findByEmail(dto.email);
+
+    if (!user) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const passwordMatch = await bcrypt.compare(dto.password, user.password);
+
+    if (!passwordMatch) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const payload = {
+      sub: user._id,
+      email: user.email,
+    };
+
+    const accessToken = await this.jwtService.signAsync(payload);
+
+    return {
+      message: 'Login successful',
+      accessToken,
+      user: {
+        id: user._id,
+        fullName: user.fullName,
+        email: user.email,
+      },
+    };
+  }
 }
-// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-('');

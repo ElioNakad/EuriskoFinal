@@ -1,12 +1,11 @@
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException } from '@nestjs/common';
 
 import * as nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 
 @Injectable()
 export class MailService {
-  private transporter;
+  private readonly transporter: Transporter;
 
   constructor() {
     this.transporter = nodemailer.createTransport({
@@ -16,23 +15,20 @@ export class MailService {
         pass: process.env.EMAIL_PASS,
       },
     });
-    console.log(process.env.EMAIL);
-    console.log(process.env.EMAIL_PASS);
   }
 
-  async sendOtp(email: string, otp: string) {
+  async sendOtp(email: string, otp: string): Promise<void> {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      const info = await this.transporter.sendMail({
+      await this.transporter.sendMail({
         from: process.env.EMAIL,
         to: email,
         subject: 'Your OTP Code',
         text: `Your OTP is ${otp}`,
       });
-
-      console.log(info);
     } catch (error) {
-      console.log(error);
+      throw new InternalServerErrorException('Failed to send OTP email', {
+        cause: error,
+      });
     }
   }
 }
