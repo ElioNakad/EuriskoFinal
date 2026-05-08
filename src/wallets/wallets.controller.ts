@@ -5,6 +5,7 @@ import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 import { WalletsService } from './wallets.service';
+import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
 
 @common.Controller('wallet')
 export class WalletsController {
@@ -18,6 +19,19 @@ export class WalletsController {
     @common.Body('amount') amount: number,
   ) {
     return this.walletService.createDepositSession(req.user.userId, amount);
+  }
+
+  @common.UseGuards(JwtAuthGuard)
+  @common.Post('withdrawal-request')
+  requestWithdrawal(
+    @common.Req() req: Request & { user: { userId: string } },
+
+    @common.Body() requestWithdrawalDto: RequestWithdrawalDto,
+  ) {
+    return this.walletService.requestWithdrawal(
+      req.user.userId,
+      requestWithdrawalDto.amount,
+    );
   }
 
   @common.Post('webhook')
