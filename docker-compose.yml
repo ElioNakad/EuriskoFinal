@@ -1,0 +1,50 @@
+services:
+
+  # =========================
+  # NESTJS APP
+  # =========================
+  app:
+    build: .
+    container_name: nest_app
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mongodb
+      - redis
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/eurisko_db
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: npm run start:dev
+
+  # =========================
+  # MONGODB
+  # =========================
+  mongodb:
+    image: mongo:latest
+    container_name: mongodb
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  # =========================
+  # REDIS
+  # =========================
+  redis:
+    image: redis:latest
+    container_name: eurisko_redis
+    ports:
+    - "6379:6379"
+    volumes:
+    - redis_data:/data
+
+# =========================
+# VOLUMES
+# =========================
+volumes:
+  mongo_data:
+  redis_data:
