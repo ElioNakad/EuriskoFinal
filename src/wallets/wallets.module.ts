@@ -9,6 +9,10 @@ import { WalletsController } from './wallets.controller';
 import { WalletsService } from './wallets.service';
 
 import { Wallet, WalletSchema } from './schemas/wallet.schema';
+import {
+  WithdrawalRequest,
+  WithdrawalRequestSchema,
+} from './schemas/withdrawal-request.schema';
 
 @Module({
   imports: [
@@ -24,6 +28,10 @@ import { Wallet, WalletSchema } from './schemas/wallet.schema';
       {
         name: Wallet.name,
         schema: WalletSchema,
+      },
+      {
+        name: WithdrawalRequest.name,
+        schema: WithdrawalRequestSchema,
       },
     ]),
   ],

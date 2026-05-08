@@ -12,10 +12,17 @@ import { Model, Types } from 'mongoose';
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
 import { Wallet } from './schemas/wallet.schema';
+import {
+  WithdrawalRequest,
+  WithdrawalRequestStatus,
+} from './schemas/withdrawal-request.schema';
 
 @Injectable()
 export class WalletsService {
   private readonly logger = new Logger(WalletsService.name);
+
+  private readonly withdrawalDelayMs = 0;
+  // 48 * 60 * 60 * 1000;
 
   private readonly stripe: any;
 
@@ -26,6 +33,9 @@ export class WalletsService {
 
     @InjectModel(Wallet.name)
     private readonly walletModel: Model<Wallet>,
+
+    @InjectModel(WithdrawalRequest.name)
+    private readonly withdrawalRequestModel: Model<WithdrawalRequest>,
   ) {
     this.stripe = new Stripe(
       this.configService.get<string>('STRIPE_SECRET_KEY') as string,
@@ -126,10 +136,13 @@ export class WalletsService {
         await existingWallet.save();
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
       const user = await this.usersService.findById(userId);
 
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       if (user?.email) {
         try {
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
           await this.mailService.sendPaymentSuccess(user.email, amount);
         } catch (error) {
           this.logger.error('Failed to send payment success email', error);
@@ -148,5 +161,43 @@ export class WalletsService {
     });
 
     return Boolean(wallet);
+  }
+
+  async requestWithdrawal(userId: string, amount: number) {
+    if (amount <= 0) {
+      throw new BadRequestException('Amount must be greater than 0');
+    }
+
+    const wallet = await this.walletModel.findOne({
+      userId: new Types.ObjectId(userId),
+    });
+
+    if (!wallet) {
+      throw new BadRequestException('Wallet not found');
+    }
+
+    if (!wallet.lastDepositAt) {
+      throw new BadRequestException('No deposit found for this wallet');
+    }
+
+    const nextEligibleAt = new Date(
+      wallet.lastDepositAt.getTime() + this.withdrawalDelayMs,
+    );
+
+    if (Date.now() < nextEligibleAt.getTime()) {
+      throw new BadRequestException(
+        `Withdrawals are available after ${nextEligibleAt.toISOString()}`,
+      );
+    }
+
+    if ((wallet.balance ?? 0) < amount) {
+      throw new BadRequestException('Insufficient wallet balance');
+    }
+
+    return this.withdrawalRequestModel.create({
+      wallet_id: wallet._id,
+      amount,
+      status: WithdrawalRequestStatus.Pending,
+    });
   }
 }
