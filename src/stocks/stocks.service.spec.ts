@@ -54,6 +54,7 @@ describe('StocksService', () => {
       companyName: 'Microsoft',
       sector: 'Technology',
       currentPrice: 420,
+      availableShares: 100,
       description: 'Software company',
       isListed: true,
     };
@@ -61,7 +62,10 @@ describe('StocksService', () => {
     stockModel.create.mockResolvedValue(createStockDto);
 
     await expect(service.create(createStockDto)).resolves.toBe(createStockDto);
-    expect(stockModel.create).toHaveBeenCalledWith(createStockDto);
+    expect(stockModel.create).toHaveBeenCalledWith({
+      ...createStockDto,
+      initialShares: createStockDto.availableShares,
+    });
   });
 
   it('should find all stocks', async () => {

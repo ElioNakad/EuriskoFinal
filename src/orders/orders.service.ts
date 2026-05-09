@@ -18,19 +18,15 @@ import {
   BuyOrderStatus,
 } from './schemas/buy-order.schema';
 import {
-  ClosedTrade,
-  ClosedTradeDocument,
-} from './schemas/closed-trade.schema';
-import {
-  PortfolioPosition,
-  PortfolioPositionDocument,
-  PortfolioPositionStatus,
-} from './schemas/portfolio-position.schema';
+  SellOrder,
+  SellOrderDocument,
+  SellOrderStatus,
+} from './schemas/sell-order.schema';
 
 const PORTFOLIO_SUMMARY_TTL_SECONDS = 60;
 
 type LeanStock = Stock & { _id: Types.ObjectId };
-type LeanPortfolioPosition = PortfolioPosition & { _id: Types.ObjectId };
+type LeanBuyOrder = BuyOrder & { _id: Types.ObjectId };
 
 interface PortfolioSummaryPosition {
   stockId: string;
@@ -73,11 +69,8 @@ export class OrdersService {
     @InjectModel(BuyOrder.name)
     private readonly buyOrderModel: Model<BuyOrderDocument>,
 
-    @InjectModel(PortfolioPosition.name)
-    private readonly portfolioPositionModel: Model<PortfolioPositionDocument>,
-
-    @InjectModel(ClosedTrade.name)
-    private readonly closedTradeModel: Model<ClosedTradeDocument>,
+    @InjectModel(SellOrder.name)
+    private readonly sellOrderModel: Model<SellOrderDocument>,
 
     private readonly redisService: RedisService,
   ) {}
@@ -94,7 +87,6 @@ export class OrdersService {
 
     try {
       let order: BuyOrderDocument | undefined;
-      let position: PortfolioPositionDocument | undefined;
 
       await session.withTransaction(async () => {
         const stock = await this.stockModel
@@ -153,24 +145,10 @@ export class OrdersService {
               stock_id: stockObjectId,
               user_id: userObjectId,
               numberOfShares: dto.numberOfShares,
+              availableShares: dto.numberOfShares,
               costPerShare,
               totalCost,
               status: BuyOrderStatus.Filled,
-            },
-          ],
-          { session },
-        );
-
-        [position] = await this.portfolioPositionModel.create(
-          [
-            {
-              user_id: userObjectId,
-              stock_id: stockObjectId,
-              buy_order_id: order._id,
-              numberOfShares: dto.numberOfShares,
-              costPerShare,
-              totalCost,
-              status: PortfolioPositionStatus.Open,
             },
           ],
           { session },
@@ -182,7 +160,6 @@ export class OrdersService {
       return {
         message: 'Buy order filled',
         order,
-        position,
       };
     } finally {
       await session.endSession();
@@ -191,7 +168,13 @@ export class OrdersService {
 
   async closeMarketSellOrder(userId: string, dto: CloseMarketSellOrderDto) {
     const userObjectId = this.toObjectId(userId, 'Invalid user id');
-    const orderObjectId = this.toObjectId(dto.orderId, 'Invalid order id');
+    const buyOrderId = dto.buyOrderId ?? dto.orderId;
+
+    if (!buyOrderId) {
+      throw new BadRequestException('Buy order id is required');
+    }
+
+    const orderObjectId = this.toObjectId(buyOrderId, 'Invalid buy order id');
 
     if (dto.numberOfShares !== undefined && dto.numberOfShares <= 0) {
       throw new BadRequestException('Number of shares must be greater than 0');
@@ -200,33 +183,33 @@ export class OrdersService {
     const session = await this.connection.startSession();
 
     try {
-      let closedTrade: ClosedTradeDocument | undefined;
+      let sellOrder: SellOrderDocument | undefined;
 
       await session.withTransaction(async () => {
-        const position = await this.portfolioPositionModel
+        const buyOrder = await this.buyOrderModel
           .findOne({
-            buy_order_id: orderObjectId,
+            _id: orderObjectId,
             user_id: userObjectId,
-            status: PortfolioPositionStatus.Open,
+            availableShares: { $gt: 0 },
           })
           .session(session)
-          .lean<LeanPortfolioPosition>();
+          .lean<LeanBuyOrder>();
 
-        if (!position) {
+        if (!buyOrder) {
           throw new NotFoundException('Open order not found');
         }
 
-        const sharesToSell = dto.numberOfShares ?? position.numberOfShares;
+        const sharesToSell = dto.numberOfShares ?? buyOrder.availableShares;
 
-        if (sharesToSell > position.numberOfShares) {
+        if (sharesToSell > buyOrder.availableShares) {
           throw new BadRequestException(
-            'Sell shares cannot exceed open position shares',
+            'Sell shares cannot exceed buy order available shares',
           );
         }
 
         const stock = await this.stockModel
           .findOne({
-            _id: position.stock_id,
+            _id: buyOrder.stock_id,
             isListed: true,
           })
           .session(session)
@@ -237,45 +220,42 @@ export class OrdersService {
         }
 
         const closedAt = new Date();
-        const averagePurchasePrice = position.costPerShare;
-        const marketPrice = stock.currentPrice;
-        const costBasis = averagePurchasePrice * sharesToSell;
-        const proceeds = marketPrice * sharesToSell;
+        const purchasePricePerShare = buyOrder.costPerShare;
+        const sellPricePerShare = stock.currentPrice;
+        const costBasis = purchasePricePerShare * sharesToSell;
+        const proceeds = sellPricePerShare * sharesToSell;
         const profitLoss = proceeds - costBasis;
-        const isFullClose = sharesToSell === position.numberOfShares;
+        const isFullClose = sharesToSell === buyOrder.availableShares;
 
-        const positionUpdate =
-          await this.portfolioPositionModel.collection.updateOne(
+        const buyOrderUpdate =
+          await this.buyOrderModel.collection.updateOne(
             {
-              _id: position._id,
+              _id: buyOrder._id,
               user_id: userObjectId,
-              buy_order_id: orderObjectId,
-              status: PortfolioPositionStatus.Open,
-              numberOfShares: { $gte: sharesToSell },
+              availableShares: { $gte: sharesToSell },
             },
             isFullClose
               ? {
                   $set: {
-                    status: PortfolioPositionStatus.Closed,
+                    availableShares: 0,
                     closedAt,
                   },
                 }
               : {
                   $inc: {
-                    numberOfShares: -sharesToSell,
-                    totalCost: -costBasis,
+                    availableShares: -sharesToSell,
                   },
                 },
             { session },
           );
 
-        if (positionUpdate.modifiedCount !== 1) {
-          throw new BadRequestException('Unable to close open position');
+        if (buyOrderUpdate.modifiedCount !== 1) {
+          throw new BadRequestException('Unable to close open order');
         }
 
         await this.stockModel.collection.updateOne(
           {
-            _id: position.stock_id,
+            _id: buyOrder.stock_id,
             isListed: true,
           },
           {
@@ -302,20 +282,20 @@ export class OrdersService {
           throw new NotFoundException('Wallet not found');
         }
 
-        [closedTrade] = await this.closedTradeModel.create(
+        [sellOrder] = await this.sellOrderModel.create(
           [
             {
               user_id: userObjectId,
-              stock_id: position.stock_id,
+              stock_id: buyOrder.stock_id,
               buy_order_id: orderObjectId,
-              portfolio_position_id: position._id,
               numberOfShares: sharesToSell,
-              averagePurchasePrice,
-              marketPrice,
+              purchasePricePerShare,
+              sellPricePerShare,
               costBasis,
               proceeds,
               profitLoss,
-              closedAt,
+              status: SellOrderStatus.Filled,
+              soldAt: closedAt,
             },
           ],
           { session },
@@ -327,7 +307,7 @@ export class OrdersService {
 
       return {
         message: 'Sell order closed',
-        closedTrade,
+        sellOrder,
         portfolioSummary,
       };
     } finally {
@@ -345,10 +325,10 @@ export class OrdersService {
 
     const userObjectId = this.toObjectId(userId, 'Invalid user id');
 
-    const positions = await this.portfolioPositionModel
+    const buyOrders = await this.buyOrderModel
       .find({
         user_id: userObjectId,
-        status: PortfolioPositionStatus.Open,
+        availableShares: { $gt: 0 },
       })
       .populate<{
         stock_id: Pick<
@@ -360,31 +340,32 @@ export class OrdersService {
 
     const byStock = new Map<string, PortfolioSummaryPosition>();
 
-    for (const position of positions) {
+    for (const order of buyOrders) {
       const stock =
-        position.stock_id && typeof position.stock_id === 'object'
-          ? position.stock_id
+        order.stock_id && typeof order.stock_id === 'object'
+          ? order.stock_id
           : undefined;
       // eslint-disable-next-line @typescript-eslint/no-base-to-string
-      const stockId = stock?._id?.toString() ?? String(position.stock_id);
+      const stockId = stock?._id?.toString() ?? String(order.stock_id);
       const current = byStock.get(stockId);
       const currentPrice = stock?.currentPrice;
+      const totalCost = order.costPerShare * order.availableShares;
 
       if (!current) {
         byStock.set(stockId, {
           stockId,
           ticker: stock?.ticker,
           companyName: stock?.companyName,
-          numberOfShares: position.numberOfShares,
-          averageCostPerShare: position.costPerShare,
-          totalCost: position.totalCost,
+          numberOfShares: order.availableShares,
+          averageCostPerShare: order.costPerShare,
+          totalCost,
           currentPrice,
         });
         continue;
       }
 
-      current.numberOfShares += position.numberOfShares;
-      current.totalCost += position.totalCost;
+      current.numberOfShares += order.availableShares;
+      current.totalCost += totalCost;
       current.averageCostPerShare = current.totalCost / current.numberOfShares;
       current.currentPrice = current.currentPrice ?? currentPrice;
     }

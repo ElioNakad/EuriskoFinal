@@ -6,11 +6,7 @@ import { RedisModule } from '../redis/redis.module';
 import { Stock, StockSchema } from '../stocks/schemas/stock.schema';
 import { Wallet, WalletSchema } from '../wallets/schemas/wallet.schema';
 import { BuyOrder, BuyOrderSchema } from './schemas/buy-order.schema';
-import { ClosedTrade, ClosedTradeSchema } from './schemas/closed-trade.schema';
-import {
-  PortfolioPosition,
-  PortfolioPositionSchema,
-} from './schemas/portfolio-position.schema';
+import { SellOrder, SellOrderSchema } from './schemas/sell-order.schema';
 import { OrdersController } from './orders.controller';
 import { OrdersGateway } from './orders.gateway';
 import { OrdersService } from './orders.service';
@@ -38,12 +34,8 @@ import { OrdersService } from './orders.service';
         schema: BuyOrderSchema,
       },
       {
-        name: PortfolioPosition.name,
-        schema: PortfolioPositionSchema,
-      },
-      {
-        name: ClosedTrade.name,
-        schema: ClosedTradeSchema,
+        name: SellOrder.name,
+        schema: SellOrderSchema,
       },
     ]),
   ],

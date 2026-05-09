@@ -7,11 +7,7 @@ import { RedisService } from '../redis/redis.service';
 import { Stock } from '../stocks/schemas/stock.schema';
 import { Wallet } from '../wallets/schemas/wallet.schema';
 import { BuyOrder, BuyOrderStatus } from './schemas/buy-order.schema';
-import { ClosedTrade } from './schemas/closed-trade.schema';
-import {
-  PortfolioPosition,
-  PortfolioPositionStatus,
-} from './schemas/portfolio-position.schema';
+import { SellOrder, SellOrderStatus } from './schemas/sell-order.schema';
 import { OrdersService } from './orders.service';
 
 describe('OrdersService', () => {
@@ -29,16 +25,13 @@ describe('OrdersService', () => {
   };
   let buyOrderModel: {
     create: jest.Mock;
-  };
-  let portfolioPositionModel: {
-    create: jest.Mock;
     findOne: jest.Mock;
     find: jest.Mock;
     collection: {
       updateOne: jest.Mock;
     };
   };
-  let closedTradeModel: {
+  let sellOrderModel: {
     create: jest.Mock;
   };
   let redisService: {
@@ -72,16 +65,13 @@ describe('OrdersService', () => {
     };
     buyOrderModel = {
       create: jest.fn(),
-    };
-    portfolioPositionModel = {
-      create: jest.fn(),
       findOne: jest.fn(),
       find: jest.fn(),
       collection: {
         updateOne: jest.fn(),
       },
     };
-    closedTradeModel = {
+    sellOrderModel = {
       create: jest.fn(),
     };
     redisService = {
@@ -112,12 +102,8 @@ describe('OrdersService', () => {
           useValue: buyOrderModel,
         },
         {
-          provide: getModelToken(PortfolioPosition.name),
-          useValue: portfolioPositionModel,
-        },
-        {
-          provide: getModelToken(ClosedTrade.name),
-          useValue: closedTradeModel,
+          provide: getModelToken(SellOrder.name),
+          useValue: sellOrderModel,
         },
         {
           provide: RedisService,
@@ -134,7 +120,6 @@ describe('OrdersService', () => {
     const stockId = new Types.ObjectId().toHexString();
     const orderId = new Types.ObjectId();
     const order = { _id: orderId };
-    const position = { _id: new Types.ObjectId() };
 
     stockModel.findOne.mockReturnValue({
       session: jest.fn().mockReturnValue({
@@ -149,7 +134,6 @@ describe('OrdersService', () => {
     stockModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
     walletModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
     buyOrderModel.create.mockResolvedValue([order]);
-    portfolioPositionModel.create.mockResolvedValue([position]);
 
     await expect(
       service.placeMarketBuyOrder(userId, {
@@ -159,7 +143,6 @@ describe('OrdersService', () => {
     ).resolves.toEqual({
       message: 'Buy order filled',
       order,
-      position,
     });
 
     expect(stockModel.collection.updateOne).toHaveBeenCalledWith(
@@ -193,23 +176,10 @@ describe('OrdersService', () => {
           stock_id: new Types.ObjectId(stockId),
           user_id: new Types.ObjectId(userId),
           numberOfShares: 4,
+          availableShares: 4,
           costPerShare: 25,
           totalCost: 100,
           status: BuyOrderStatus.Filled,
-        },
-      ],
-      { session },
-    );
-    expect(portfolioPositionModel.create).toHaveBeenCalledWith(
-      [
-        {
-          user_id: new Types.ObjectId(userId),
-          stock_id: new Types.ObjectId(stockId),
-          buy_order_id: orderId,
-          numberOfShares: 4,
-          costPerShare: 25,
-          totalCost: 100,
-          status: PortfolioPositionStatus.Open,
         },
       ],
       { session },
@@ -245,7 +215,6 @@ describe('OrdersService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(buyOrderModel.create).not.toHaveBeenCalled();
-    expect(portfolioPositionModel.create).not.toHaveBeenCalled();
     expect(redisService.delete).not.toHaveBeenCalled();
     expect(session.endSession).toHaveBeenCalled();
   });
@@ -254,8 +223,7 @@ describe('OrdersService', () => {
     const userId = new Types.ObjectId().toHexString();
     const orderId = new Types.ObjectId().toHexString();
     const stockId = new Types.ObjectId();
-    const positionId = new Types.ObjectId();
-    const closedTrade = { _id: new Types.ObjectId() };
+    const sellOrder = { _id: new Types.ObjectId() };
     const summary = {
       userId,
       positions: [],
@@ -268,17 +236,17 @@ describe('OrdersService', () => {
       cachedAt: new Date().toISOString(),
     };
 
-    portfolioPositionModel.findOne.mockReturnValue({
+    buyOrderModel.findOne.mockReturnValue({
       session: jest.fn().mockReturnValue({
         lean: jest.fn().mockResolvedValue({
-          _id: positionId,
+          _id: new Types.ObjectId(orderId),
           stock_id: stockId,
-          buy_order_id: new Types.ObjectId(orderId),
           user_id: new Types.ObjectId(userId),
           numberOfShares: 4,
+          availableShares: 4,
           costPerShare: 25,
           totalCost: 100,
-          status: PortfolioPositionStatus.Open,
+          status: BuyOrderStatus.Filled,
         }),
       }),
     });
@@ -291,12 +259,12 @@ describe('OrdersService', () => {
         }),
       }),
     });
-    portfolioPositionModel.collection.updateOne.mockResolvedValue({
+    buyOrderModel.collection.updateOne.mockResolvedValue({
       modifiedCount: 1,
     });
     stockModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
     walletModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
-    closedTradeModel.create.mockResolvedValue([closedTrade]);
+    sellOrderModel.create.mockResolvedValue([sellOrder]);
     redisService.get.mockResolvedValue(summary);
 
     await expect(
@@ -305,21 +273,19 @@ describe('OrdersService', () => {
       }),
     ).resolves.toEqual({
       message: 'Sell order closed',
-      closedTrade,
+      sellOrder,
       portfolioSummary: summary,
     });
 
-    expect(portfolioPositionModel.collection.updateOne).toHaveBeenCalledWith(
+    expect(buyOrderModel.collection.updateOne).toHaveBeenCalledWith(
       {
-        _id: positionId,
+        _id: new Types.ObjectId(orderId),
         user_id: new Types.ObjectId(userId),
-        buy_order_id: new Types.ObjectId(orderId),
-        status: PortfolioPositionStatus.Open,
-        numberOfShares: { $gte: 4 },
+        availableShares: { $gte: 4 },
       },
       {
         $set: expect.objectContaining({
-          status: PortfolioPositionStatus.Closed,
+          availableShares: 0,
         }),
       },
       { session },
@@ -347,19 +313,19 @@ describe('OrdersService', () => {
       },
       { session },
     );
-    expect(closedTradeModel.create).toHaveBeenCalledWith(
+    expect(sellOrderModel.create).toHaveBeenCalledWith(
       [
         expect.objectContaining({
           user_id: new Types.ObjectId(userId),
           stock_id: stockId,
           buy_order_id: new Types.ObjectId(orderId),
-          portfolio_position_id: positionId,
           numberOfShares: 4,
-          averagePurchasePrice: 25,
-          marketPrice: 30,
+          purchasePricePerShare: 25,
+          sellPricePerShare: 30,
           costBasis: 100,
           proceeds: 120,
           profitLoss: 20,
+          status: SellOrderStatus.Filled,
         }),
       ],
       { session },
@@ -396,6 +362,6 @@ describe('OrdersService', () => {
     expect(redisService.get).toHaveBeenCalledWith(
       `portfolio-summary:${userId}`,
     );
-    expect(portfolioPositionModel.find).not.toHaveBeenCalled();
+    expect(buyOrderModel.find).not.toHaveBeenCalled();
   });
 });

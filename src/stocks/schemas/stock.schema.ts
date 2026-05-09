@@ -23,6 +23,9 @@ export class Stock {
   @Prop({ required: true, default: 100, min: 0 })
   availableShares!: number;
 
+  @Prop({ required: true, default: 100, min: 0 })
+  initialShares!: number;
+
   @Prop()
   description!: string;
 
