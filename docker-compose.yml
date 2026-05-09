@@ -11,8 +11,10 @@ services:
       - "3000:3000"
 
     depends_on:
-      - mongodb
-      - redis
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_started
 
     env_file:
       - .env
@@ -30,11 +32,23 @@ services:
     image: mongo:latest
     container_name: mongodb
 
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+
     ports:
-      - "27018:27017"
+      - "27019:27017"
 
     volumes:
       - mongo_data:/data/db
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mongosh --quiet --eval \"try { rs.status().ok } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongodb:27017'}]}).ok }\"",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
 
   # =========================
   # REDIS

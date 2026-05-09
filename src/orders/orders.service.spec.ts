@@ -1,0 +1,259 @@
+import { BadRequestException } from '@nestjs/common';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
+import { Test, TestingModule } from '@nestjs/testing';
+import { Types } from 'mongoose';
+
+import { RedisService } from '../redis/redis.service';
+import { Stock } from '../stocks/schemas/stock.schema';
+import { Wallet } from '../wallets/schemas/wallet.schema';
+import { BuyOrder, BuyOrderStatus } from './schemas/buy-order.schema';
+import {
+  PortfolioPosition,
+  PortfolioPositionStatus,
+} from './schemas/portfolio-position.schema';
+import { OrdersService } from './orders.service';
+
+describe('OrdersService', () => {
+  let service: OrdersService;
+  let stockModel: {
+    findOne: jest.Mock;
+    collection: {
+      updateOne: jest.Mock;
+    };
+  };
+  let walletModel: {
+    collection: {
+      updateOne: jest.Mock;
+    };
+  };
+  let buyOrderModel: {
+    create: jest.Mock;
+  };
+  let portfolioPositionModel: {
+    create: jest.Mock;
+    find: jest.Mock;
+  };
+  let redisService: {
+    get: jest.Mock;
+    set: jest.Mock;
+    delete: jest.Mock;
+  };
+  let session: {
+    withTransaction: jest.Mock;
+    endSession: jest.Mock;
+  };
+
+  beforeEach(async () => {
+    session = {
+      withTransaction: jest.fn(async (callback: () => Promise<void>) =>
+        callback(),
+      ),
+      endSession: jest.fn(),
+    };
+
+    stockModel = {
+      findOne: jest.fn(),
+      collection: {
+        updateOne: jest.fn(),
+      },
+    };
+    walletModel = {
+      collection: {
+        updateOne: jest.fn(),
+      },
+    };
+    buyOrderModel = {
+      create: jest.fn(),
+    };
+    portfolioPositionModel = {
+      create: jest.fn(),
+      find: jest.fn(),
+    };
+    redisService = {
+      get: jest.fn(),
+      set: jest.fn(),
+      delete: jest.fn(),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        OrdersService,
+        {
+          provide: getConnectionToken(),
+          useValue: {
+            startSession: jest.fn().mockResolvedValue(session),
+          },
+        },
+        {
+          provide: getModelToken(Stock.name),
+          useValue: stockModel,
+        },
+        {
+          provide: getModelToken(Wallet.name),
+          useValue: walletModel,
+        },
+        {
+          provide: getModelToken(BuyOrder.name),
+          useValue: buyOrderModel,
+        },
+        {
+          provide: getModelToken(PortfolioPosition.name),
+          useValue: portfolioPositionModel,
+        },
+        {
+          provide: RedisService,
+          useValue: redisService,
+        },
+      ],
+    }).compile();
+
+    service = module.get<OrdersService>(OrdersService);
+  });
+
+  it('fills a market buy order inside a transaction and evicts portfolio cache', async () => {
+    const userId = new Types.ObjectId().toHexString();
+    const stockId = new Types.ObjectId().toHexString();
+    const orderId = new Types.ObjectId();
+    const order = { _id: orderId };
+    const position = { _id: new Types.ObjectId() };
+
+    stockModel.findOne.mockReturnValue({
+      session: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          _id: new Types.ObjectId(stockId),
+          currentPrice: 25,
+          isListed: true,
+          availableShares: 10,
+        }),
+      }),
+    });
+    stockModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    walletModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    buyOrderModel.create.mockResolvedValue([order]);
+    portfolioPositionModel.create.mockResolvedValue([position]);
+
+    await expect(
+      service.placeMarketBuyOrder(userId, {
+        stockId,
+        numberOfShares: 4,
+      }),
+    ).resolves.toEqual({
+      message: 'Buy order filled',
+      order,
+      position,
+    });
+
+    expect(stockModel.collection.updateOne).toHaveBeenCalledWith(
+      {
+        _id: new Types.ObjectId(stockId),
+        isListed: true,
+        availableShares: { $gte: 4 },
+      },
+      {
+        $inc: {
+          availableShares: -4,
+        },
+      },
+      { session },
+    );
+    expect(walletModel.collection.updateOne).toHaveBeenCalledWith(
+      {
+        userId: new Types.ObjectId(userId),
+        balance: { $gte: 100 },
+      },
+      {
+        $inc: {
+          balance: -100,
+        },
+      },
+      { session },
+    );
+    expect(buyOrderModel.create).toHaveBeenCalledWith(
+      [
+        {
+          stock_id: new Types.ObjectId(stockId),
+          user_id: new Types.ObjectId(userId),
+          numberOfShares: 4,
+          costPerShare: 25,
+          totalCost: 100,
+          status: BuyOrderStatus.Filled,
+        },
+      ],
+      { session },
+    );
+    expect(portfolioPositionModel.create).toHaveBeenCalledWith(
+      [
+        {
+          user_id: new Types.ObjectId(userId),
+          stock_id: new Types.ObjectId(stockId),
+          buy_order_id: orderId,
+          numberOfShares: 4,
+          costPerShare: 25,
+          totalCost: 100,
+          status: PortfolioPositionStatus.Open,
+        },
+      ],
+      { session },
+    );
+    expect(redisService.delete).toHaveBeenCalledWith(
+      `portfolio-summary:${userId}`,
+    );
+    expect(session.endSession).toHaveBeenCalled();
+  });
+
+  it('rejects when the wallet cannot cover the total cost', async () => {
+    const userId = new Types.ObjectId().toHexString();
+    const stockId = new Types.ObjectId().toHexString();
+
+    stockModel.findOne.mockReturnValue({
+      session: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          _id: new Types.ObjectId(stockId),
+          currentPrice: 25,
+          isListed: true,
+          availableShares: 10,
+        }),
+      }),
+    });
+    stockModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    walletModel.collection.updateOne.mockResolvedValue({ modifiedCount: 0 });
+
+    await expect(
+      service.placeMarketBuyOrder(userId, {
+        stockId,
+        numberOfShares: 4,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(buyOrderModel.create).not.toHaveBeenCalled();
+    expect(portfolioPositionModel.create).not.toHaveBeenCalled();
+    expect(redisService.delete).not.toHaveBeenCalled();
+    expect(session.endSession).toHaveBeenCalled();
+  });
+
+  it('returns cached portfolio summaries by member id', async () => {
+    const userId = new Types.ObjectId().toHexString();
+    const cachedSummary = {
+      userId,
+      positions: [],
+      totals: {
+        shares: 0,
+        cost: 0,
+        marketValue: 0,
+        unrealizedGainLoss: 0,
+      },
+      cachedAt: new Date().toISOString(),
+    };
+
+    redisService.get.mockResolvedValue(cachedSummary);
+
+    await expect(service.getPortfolioSummary(userId)).resolves.toEqual(
+      cachedSummary,
+    );
+
+    expect(redisService.get).toHaveBeenCalledWith(
+      `portfolio-summary:${userId}`,
+    );
+    expect(portfolioPositionModel.find).not.toHaveBeenCalled();
+  });
+});
