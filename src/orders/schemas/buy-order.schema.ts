@@ -32,6 +32,9 @@ export class BuyOrder {
   numberOfShares!: number;
 
   @Prop({ required: true, min: 0 })
+  availableShares!: number;
+
+  @Prop({ required: true, min: 0 })
   costPerShare!: number;
 
   @Prop({ required: true, min: 0 })
@@ -42,6 +45,12 @@ export class BuyOrder {
     default: BuyOrderStatus.Filled,
   })
   status!: BuyOrderStatus;
+
+  @Prop({
+    type: Date,
+    default: null,
+  })
+  closedAt?: Date | null;
 }
 
 export const BuyOrderSchema = SchemaFactory.createForClass(BuyOrder);

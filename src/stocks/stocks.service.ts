@@ -17,7 +17,12 @@ export class StocksService {
   ) {}
 
   async create(createStockDto: CreateStockDto) {
-    return this.stockModel.create(createStockDto);
+    return this.stockModel.create({
+      ...createStockDto,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+      initialShares:
+        createStockDto.initialShares ?? createStockDto.availableShares,
+    });
   }
 
   async findAll() {

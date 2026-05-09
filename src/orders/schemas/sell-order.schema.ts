@@ -1,13 +1,25 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Types } from 'mongoose';
 
-export type ClosedTradeDocument = HydratedDocument<ClosedTrade>;
+export type SellOrderDocument = HydratedDocument<SellOrder>;
+
+export enum SellOrderStatus {
+  Filled = 'filled',
+}
 
 @Schema({
-  collection: 'closed_trades',
+  collection: 'sell_orders',
   timestamps: true,
 })
-export class ClosedTrade {
+export class SellOrder {
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'BuyOrder',
+    required: true,
+    index: true,
+  })
+  buy_order_id!: Types.ObjectId;
+
   @Prop({
     type: Types.ObjectId,
     ref: 'User',
@@ -24,30 +36,14 @@ export class ClosedTrade {
   })
   stock_id!: Types.ObjectId;
 
-  @Prop({
-    type: Types.ObjectId,
-    ref: 'BuyOrder',
-    required: true,
-    index: true,
-  })
-  buy_order_id!: Types.ObjectId;
-
-  @Prop({
-    type: Types.ObjectId,
-    ref: 'PortfolioPosition',
-    required: true,
-    index: true,
-  })
-  portfolio_position_id!: Types.ObjectId;
-
   @Prop({ required: true, min: 1 })
   numberOfShares!: number;
 
   @Prop({ required: true, min: 0 })
-  averagePurchasePrice!: number;
+  purchasePricePerShare!: number;
 
   @Prop({ required: true, min: 0 })
-  marketPrice!: number;
+  sellPricePerShare!: number;
 
   @Prop({ required: true, min: 0 })
   costBasis!: number;
@@ -58,8 +54,14 @@ export class ClosedTrade {
   @Prop({ required: true })
   profitLoss!: number;
 
+  @Prop({
+    enum: SellOrderStatus,
+    default: SellOrderStatus.Filled,
+  })
+  status!: SellOrderStatus;
+
   @Prop({ required: true })
-  closedAt!: Date;
+  soldAt!: Date;
 }
 
-export const ClosedTradeSchema = SchemaFactory.createForClass(ClosedTrade);
+export const SellOrderSchema = SchemaFactory.createForClass(SellOrder);

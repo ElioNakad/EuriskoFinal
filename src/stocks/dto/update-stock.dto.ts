@@ -33,6 +33,12 @@ export class UpdateStockDto {
   availableShares?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  initialShares?: number;
+
+  @IsOptional()
   @IsString()
   description?: string;
 
