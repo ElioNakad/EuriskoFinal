@@ -10,12 +10,17 @@ import { Connection, Model, Types } from 'mongoose';
 import { RedisService } from '../redis/redis.service';
 import { Stock, StockDocument } from '../stocks/schemas/stock.schema';
 import { Wallet, WalletDocument } from '../wallets/schemas/wallet.schema';
+import { CloseMarketSellOrderDto } from './dto/close-market-sell-order.dto';
 import { PlaceMarketBuyOrderDto } from './dto/place-market-buy-order.dto';
 import {
   BuyOrder,
   BuyOrderDocument,
   BuyOrderStatus,
 } from './schemas/buy-order.schema';
+import {
+  ClosedTrade,
+  ClosedTradeDocument,
+} from './schemas/closed-trade.schema';
 import {
   PortfolioPosition,
   PortfolioPositionDocument,
@@ -25,6 +30,7 @@ import {
 const PORTFOLIO_SUMMARY_TTL_SECONDS = 60;
 
 type LeanStock = Stock & { _id: Types.ObjectId };
+type LeanPortfolioPosition = PortfolioPosition & { _id: Types.ObjectId };
 
 interface PortfolioSummaryPosition {
   stockId: string;
@@ -69,6 +75,9 @@ export class OrdersService {
 
     @InjectModel(PortfolioPosition.name)
     private readonly portfolioPositionModel: Model<PortfolioPositionDocument>,
+
+    @InjectModel(ClosedTrade.name)
+    private readonly closedTradeModel: Model<ClosedTradeDocument>,
 
     private readonly redisService: RedisService,
   ) {}
@@ -174,6 +183,152 @@ export class OrdersService {
         message: 'Buy order filled',
         order,
         position,
+      };
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  async closeMarketSellOrder(userId: string, dto: CloseMarketSellOrderDto) {
+    const userObjectId = this.toObjectId(userId, 'Invalid user id');
+    const orderObjectId = this.toObjectId(dto.orderId, 'Invalid order id');
+
+    if (dto.numberOfShares !== undefined && dto.numberOfShares <= 0) {
+      throw new BadRequestException('Number of shares must be greater than 0');
+    }
+
+    const session = await this.connection.startSession();
+
+    try {
+      let closedTrade: ClosedTradeDocument | undefined;
+
+      await session.withTransaction(async () => {
+        const position = await this.portfolioPositionModel
+          .findOne({
+            buy_order_id: orderObjectId,
+            user_id: userObjectId,
+            status: PortfolioPositionStatus.Open,
+          })
+          .session(session)
+          .lean<LeanPortfolioPosition>();
+
+        if (!position) {
+          throw new NotFoundException('Open order not found');
+        }
+
+        const sharesToSell = dto.numberOfShares ?? position.numberOfShares;
+
+        if (sharesToSell > position.numberOfShares) {
+          throw new BadRequestException(
+            'Sell shares cannot exceed open position shares',
+          );
+        }
+
+        const stock = await this.stockModel
+          .findOne({
+            _id: position.stock_id,
+            isListed: true,
+          })
+          .session(session)
+          .lean<LeanStock>();
+
+        if (!stock) {
+          throw new NotFoundException('Stock not found or not listed');
+        }
+
+        const closedAt = new Date();
+        const averagePurchasePrice = position.costPerShare;
+        const marketPrice = stock.currentPrice;
+        const costBasis = averagePurchasePrice * sharesToSell;
+        const proceeds = marketPrice * sharesToSell;
+        const profitLoss = proceeds - costBasis;
+        const isFullClose = sharesToSell === position.numberOfShares;
+
+        const positionUpdate =
+          await this.portfolioPositionModel.collection.updateOne(
+            {
+              _id: position._id,
+              user_id: userObjectId,
+              buy_order_id: orderObjectId,
+              status: PortfolioPositionStatus.Open,
+              numberOfShares: { $gte: sharesToSell },
+            },
+            isFullClose
+              ? {
+                  $set: {
+                    status: PortfolioPositionStatus.Closed,
+                    closedAt,
+                  },
+                }
+              : {
+                  $inc: {
+                    numberOfShares: -sharesToSell,
+                    totalCost: -costBasis,
+                  },
+                },
+            { session },
+          );
+
+        if (positionUpdate.modifiedCount !== 1) {
+          throw new BadRequestException('Unable to close open position');
+        }
+
+        await this.stockModel.collection.updateOne(
+          {
+            _id: position.stock_id,
+            isListed: true,
+          },
+          {
+            $inc: {
+              availableShares: sharesToSell,
+            },
+          },
+          { session },
+        );
+
+        const walletUpdate = await this.walletModel.collection.updateOne(
+          {
+            userId: userObjectId,
+          },
+          {
+            $inc: {
+              balance: proceeds,
+            },
+          },
+          { session },
+        );
+
+        if (walletUpdate.modifiedCount !== 1) {
+          throw new NotFoundException('Wallet not found');
+        }
+
+        [closedTrade] = await this.closedTradeModel.create(
+          [
+            {
+              user_id: userObjectId,
+              stock_id: position.stock_id,
+              buy_order_id: orderObjectId,
+              portfolio_position_id: position._id,
+              numberOfShares: sharesToSell,
+              averagePurchasePrice,
+              marketPrice,
+              costBasis,
+              proceeds,
+              profitLoss,
+              closedAt,
+            },
+          ],
+          { session },
+        );
+      });
+
+      await this.evictPortfolioSummary(userId);
+      const portfolioSummary = await this.getPortfolioSummary(userId);
+
+      return {
+        message: 'Sell order closed',
+        closedTrade,
+        portfolioSummary,
       };
     } finally {
       await session.endSession();
