@@ -12,7 +12,7 @@ export class UsersService {
     private readonly userModel: Model<UserDocument>,
   ) {}
 
-  async create(data: Partial<User>) {
+  async create(data: Partial<User>): Promise<UserDocument> {
     const existingUser = await this.userModel.findOne({
       $or: [{ email: data.email }, { nationalId: data.nationalId }],
     });
@@ -24,13 +24,13 @@ export class UsersService {
     return this.userModel.create(data);
   }
 
-  async findByEmail(email: string) {
+  async findByEmail(email: string): Promise<UserDocument | null> {
     return this.userModel.findOne({
       email: email.toLowerCase(),
     });
   }
 
-  async findById(userId: string) {
+  async findById(userId: string): Promise<UserDocument | null> {
     return this.userModel.findById(userId);
   }
 }

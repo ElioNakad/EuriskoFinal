@@ -1,21 +1,21 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
-
 import { ConfigService } from '@nestjs/config';
-
 import { InjectModel } from '@nestjs/mongoose';
-
-import Stripe from 'stripe';
-
 import { Model, Types } from 'mongoose';
+import Stripe from 'stripe';
 
 import { MailService } from '../mail/mail.service';
 import { UsersService } from '../users/users.service';
-import { Wallet } from './schemas/wallet.schema';
+import { Wallet, WalletDocument } from './schemas/wallet.schema';
 import {
   WithdrawalRequest,
+  WithdrawalRequestDocument,
   WithdrawalRequestStatus,
 } from './schemas/withdrawal-request.schema';
+
+type CheckoutSession = Awaited<
+  ReturnType<Stripe.Stripe['checkout']['sessions']['create']>
+>;
 
 @Injectable()
 export class WalletsService {
@@ -24,7 +24,7 @@ export class WalletsService {
   private readonly withdrawalDelayMs = 0;
   // 48 * 60 * 60 * 1000;
 
-  private readonly stripe: any;
+  private readonly stripe: Stripe.Stripe;
 
   constructor(
     private readonly configService: ConfigService,
@@ -32,14 +32,15 @@ export class WalletsService {
     private readonly usersService: UsersService,
 
     @InjectModel(Wallet.name)
-    private readonly walletModel: Model<Wallet>,
+    private readonly walletModel: Model<WalletDocument>,
 
     @InjectModel(WithdrawalRequest.name)
-    private readonly withdrawalRequestModel: Model<WithdrawalRequest>,
+    private readonly withdrawalRequestModel: Model<WithdrawalRequestDocument>,
   ) {
-    this.stripe = new Stripe(
-      this.configService.get<string>('STRIPE_SECRET_KEY') as string,
-    );
+    const stripeSecretKey =
+      this.configService.getOrThrow<string>('STRIPE_SECRET_KEY');
+
+    this.stripe = new Stripe(stripeSecretKey);
   }
 
   async createDepositSession(
@@ -50,7 +51,6 @@ export class WalletsService {
       throw new BadRequestException('Amount must be greater than 0');
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const session = await this.stripe.checkout.sessions.create({
       payment_method_types: ['card'],
 
@@ -83,7 +83,6 @@ export class WalletsService {
     });
 
     return {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       url: session.url,
     };
   }
@@ -92,26 +91,21 @@ export class WalletsService {
     rawBody: Buffer,
     signature: string,
   ): Promise<{ received: boolean }> {
-    const webhookSecret = this.configService.get<string>(
+    const webhookSecret = this.configService.getOrThrow<string>(
       'STRIPE_WEBHOOK_SECRET',
-    ) as string;
+    );
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
     const event = this.stripe.webhooks.constructEvent(
       rawBody,
       signature,
       webhookSecret,
     );
 
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     if (event.type === 'checkout.session.completed') {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      const session = event.data.object;
+      const session = event.data.object as CheckoutSession;
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       const userId = String(session.metadata?.userId ?? '');
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       const amount = Number(session.metadata?.amount);
 
       if (!userId || Number.isNaN(amount)) {
@@ -136,7 +130,7 @@ export class WalletsService {
         await existingWallet.save();
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
       const user = await this.usersService.findById(userId);
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
@@ -145,7 +139,10 @@ export class WalletsService {
           // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
           await this.mailService.sendPaymentSuccess(user.email, amount);
         } catch (error) {
-          this.logger.error('Failed to send payment success email', error);
+          this.logger.error(
+            'Failed to send payment success email',
+            error instanceof Error ? error.stack : String(error),
+          );
         }
       }
     }
@@ -163,7 +160,10 @@ export class WalletsService {
     return Boolean(wallet);
   }
 
-  async requestWithdrawal(userId: string, amount: number) {
+  async requestWithdrawal(
+    userId: string,
+    amount: number,
+  ): Promise<WithdrawalRequestDocument> {
     if (amount <= 0) {
       throw new BadRequestException('Amount must be greater than 0');
     }
