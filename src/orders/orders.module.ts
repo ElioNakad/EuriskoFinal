@@ -6,6 +6,7 @@ import { RedisModule } from '../redis/redis.module';
 import { Stock, StockSchema } from '../stocks/schemas/stock.schema';
 import { Wallet, WalletSchema } from '../wallets/schemas/wallet.schema';
 import { BuyOrder, BuyOrderSchema } from './schemas/buy-order.schema';
+import { ClosedTrade, ClosedTradeSchema } from './schemas/closed-trade.schema';
 import {
   PortfolioPosition,
   PortfolioPositionSchema,
@@ -39,6 +40,10 @@ import { OrdersService } from './orders.service';
       {
         name: PortfolioPosition.name,
         schema: PortfolioPositionSchema,
+      },
+      {
+        name: ClosedTrade.name,
+        schema: ClosedTradeSchema,
       },
     ]),
   ],

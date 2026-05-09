@@ -12,6 +12,7 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 
+import { CloseMarketSellOrderDto } from './dto/close-market-sell-order.dto';
 import { PlaceMarketBuyOrderDto } from './dto/place-market-buy-order.dto';
 import { OrdersService } from './orders.service';
 
@@ -95,6 +96,48 @@ export class OrdersGateway implements OnGatewayConnection {
       );
 
       client.emit('order_filled', result);
+    } catch (error) {
+      client.emit('order_rejected', {
+        message: error instanceof Error ? error.message : 'Order rejected',
+      });
+    }
+  }
+
+  @SubscribeMessage('market_sell_order')
+  async handleMarketSellOrder(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: unknown,
+  ) {
+    if (!client.user) {
+      client.emit('order_rejected', {
+        message: 'Unauthorized',
+      });
+      return;
+    }
+
+    const dto = plainToInstance(CloseMarketSellOrderDto, payload);
+    const errors = await validate(dto, {
+      whitelist: true,
+      forbidNonWhitelisted: true,
+    });
+
+    if (errors.length > 0) {
+      client.emit('order_rejected', {
+        message: 'Invalid sell order payload',
+      });
+      return;
+    }
+
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
+      const result = await this.ordersService.closeMarketSellOrder(
+        client.user.userId,
+        dto,
+      );
+
+      client.emit('order_closed', result);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+      client.emit('portfolio_value_updated', result.portfolioSummary);
     } catch (error) {
       client.emit('order_rejected', {
         message: error instanceof Error ? error.message : 'Order rejected',

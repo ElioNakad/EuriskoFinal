@@ -5,10 +5,10 @@ services:
   # =========================
   app:
     build: .
-    container_name: nest_app
+    container_name: ${APP_CONTAINER_NAME:-nest_app}
 
     ports:
-      - "3000:3000"
+      - "${APP_HOST_PORT:-3000}:${PORT:-3000}"
 
     depends_on:
       mongodb:
@@ -16,8 +16,16 @@ services:
       redis:
         condition: service_started
 
-    env_file:
-      - .env
+    environment:
+      PORT: ${PORT:-3000}
+      MONGO_URI: ${MONGO_URI:-mongodb://mongodb:27017/eurisko_db?replicaSet=rs0}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      JWT_SECRET: ${JWT_SECRET:-local-dev-jwt-secret}
+      EMAIL: ${EMAIL:-}
+      EMAIL_PASS: ${EMAIL_PASS:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
 
     volumes:
       - .:/app
@@ -30,12 +38,12 @@ services:
   # =========================
   mongodb:
     image: mongo:latest
-    container_name: mongodb
+    container_name: ${MONGO_CONTAINER_NAME:-mongodb}
 
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
 
     ports:
-      - "27019:27017"
+      - "${MONGO_HOST_PORT:-27019}:27017"
 
     volumes:
       - mongo_data:/data/db
@@ -55,10 +63,10 @@ services:
   # =========================
   redis:
     image: redis:latest
-    container_name: eurisko_redis
+    container_name: ${REDIS_CONTAINER_NAME:-eurisko_redis}
 
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
 
     volumes:
       - redis_data:/data
