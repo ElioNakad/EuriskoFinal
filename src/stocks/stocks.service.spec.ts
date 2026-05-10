@@ -3,9 +3,13 @@ import { getModelToken } from '@nestjs/mongoose';
 import { StocksService } from './stocks.service';
 import { StockHistory } from './schemas/stock-history.schema';
 import { Stock } from './schemas/stock.schema';
+import { RabbitMqService } from '../rabbitmq/rabbitmq.service';
 
 describe('StocksService', () => {
   let service: StocksService;
+  let rabbitMqService: {
+    publish: jest.Mock;
+  };
   let stockModel: {
     create: jest.Mock;
     find: jest.Mock;
@@ -26,6 +30,9 @@ describe('StocksService', () => {
     stockHistoryModel = {
       find: jest.fn(),
     };
+    rabbitMqService = {
+      publish: jest.fn().mockResolvedValue(true),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -37,6 +44,10 @@ describe('StocksService', () => {
         {
           provide: getModelToken(StockHistory.name),
           useValue: stockHistoryModel,
+        },
+        {
+          provide: RabbitMqService,
+          useValue: rabbitMqService,
         },
       ],
     }).compile();
@@ -125,8 +136,12 @@ describe('StocksService', () => {
 
   it('should update a stock by ticker', async () => {
     const updatedStock = { ticker: 'AAPL', currentPrice: 210 };
+    const previousStock = { ticker: 'AAPL', currentPrice: 200 };
     const update = { currentPrice: 210 };
 
+    stockModel.findOne.mockReturnValue({
+      exec: jest.fn().mockResolvedValue(previousStock),
+    });
     stockModel.findOneAndUpdate.mockReturnValue({
       exec: jest.fn().mockResolvedValue(updatedStock),
     });
@@ -144,10 +159,19 @@ describe('StocksService', () => {
         runValidators: true,
       },
     );
+    expect(rabbitMqService.publish).toHaveBeenCalledWith(
+      'stock.price',
+      'stock.price.updated',
+      expect.objectContaining({
+        ticker: 'AAPL',
+        previousPrice: 200,
+        currentPrice: 210,
+      }),
+    );
   });
 
   it('should throw when updating a missing stock', async () => {
-    stockModel.findOneAndUpdate.mockReturnValue({
+    stockModel.findOne.mockReturnValue({
       exec: jest.fn().mockResolvedValue(null),
     });
 
