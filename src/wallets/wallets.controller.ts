@@ -6,6 +6,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 import { WalletsService } from './wallets.service';
 import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
+import { TransactionHistoryQueryDto } from './dto/transaction-history-query.dto';
 
 @common.Controller('wallet')
 export class WalletsController {
@@ -32,6 +33,15 @@ export class WalletsController {
       req.user.userId,
       requestWithdrawalDto.amount,
     );
+  }
+
+  @common.UseGuards(JwtAuthGuard)
+  @common.Get('transactions/history')
+  getTransactionHistory(
+    @common.Req() req: Request & { user: { userId: string } },
+    @common.Query() query: TransactionHistoryQueryDto,
+  ) {
+    return this.walletService.getTransactionHistory(req.user.userId, query);
   }
 
   @common.Post('webhook')
