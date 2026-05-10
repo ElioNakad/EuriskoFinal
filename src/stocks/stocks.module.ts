@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RabbitMqModule } from '../rabbitmq/rabbitmq.module';
 import { StocksController } from './stocks.controller';
 import { StocksService } from './stocks.service';
 
@@ -14,6 +15,7 @@ import {
 
 @Module({
   imports: [
+    RabbitMqModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET,
       signOptions: {

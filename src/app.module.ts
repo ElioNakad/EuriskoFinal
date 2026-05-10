@@ -7,6 +7,8 @@ import { UsersModule } from './users/users.module';
 import { StocksModule } from './stocks/stocks.module';
 import { WalletsModule } from './wallets/wallets.module';
 import { OrdersModule } from './orders/orders.module';
+import { RabbitMqModule } from './rabbitmq/rabbitmq.module';
+import { StockAlertsModule } from './stock-alerts/stock-alerts.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { OrdersModule } from './orders/orders.module';
     StocksModule,
     WalletsModule,
     OrdersModule,
+    RabbitMqModule,
+    StockAlertsModule,
   ],
 })
 export class AppModule {}

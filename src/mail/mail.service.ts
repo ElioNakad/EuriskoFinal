@@ -49,4 +49,28 @@ export class MailService {
       );
     }
   }
+
+  async sendStockAlertTriggered(
+    email: string,
+    ticker: string,
+    direction: string,
+    thresholdPrice: number,
+    triggeredPrice: number,
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: process.env.EMAIL,
+        to: email,
+        subject: `Stock alert triggered for ${ticker}`,
+        text: `${ticker} crossed ${direction} your $${thresholdPrice} alert. Current price: $${triggeredPrice}.`,
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Failed to send stock alert email',
+        {
+          cause: error,
+        },
+      );
+    }
+  }
 }
