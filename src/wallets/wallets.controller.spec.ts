@@ -14,6 +14,7 @@ describe('WalletsController', () => {
           provide: WalletsService,
           useValue: {
             createDepositSession: jest.fn(),
+            getTransactionHistory: jest.fn(),
             handleWebhook: jest.fn(),
             requestWithdrawal: jest.fn(),
           },

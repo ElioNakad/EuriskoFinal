@@ -8,7 +8,16 @@ import { UsersModule } from '../users/users.module';
 import { WalletsController } from './wallets.controller';
 import { WalletsService } from './wallets.service';
 
+import { BuyOrder, BuyOrderSchema } from '../orders/schemas/buy-order.schema';
+import {
+  SellOrder,
+  SellOrderSchema,
+} from '../orders/schemas/sell-order.schema';
 import { Wallet, WalletSchema } from './schemas/wallet.schema';
+import {
+  WalletTransaction,
+  WalletTransactionSchema,
+} from './schemas/wallet-transaction.schema';
 import {
   WithdrawalRequest,
   WithdrawalRequestSchema,
@@ -32,6 +41,18 @@ import {
       {
         name: WithdrawalRequest.name,
         schema: WithdrawalRequestSchema,
+      },
+      {
+        name: WalletTransaction.name,
+        schema: WalletTransactionSchema,
+      },
+      {
+        name: BuyOrder.name,
+        schema: BuyOrderSchema,
+      },
+      {
+        name: SellOrder.name,
+        schema: SellOrderSchema,
       },
     ]),
   ],
