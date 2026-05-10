@@ -40,10 +40,15 @@ export class RabbitMqService
 
     await channel.assertExchange(exchange, 'topic', { durable: true });
 
-    return channel.publish(exchange, routingKey, Buffer.from(JSON.stringify(payload)), {
-      contentType: 'application/json',
-      persistent: true,
-    });
+    return channel.publish(
+      exchange,
+      routingKey,
+      Buffer.from(JSON.stringify(payload)),
+      {
+        contentType: 'application/json',
+        persistent: true,
+      },
+    );
   }
 
   async consume(
@@ -114,4 +119,3 @@ export class RabbitMqService
     }
   }
 }
-

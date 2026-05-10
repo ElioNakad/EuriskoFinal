@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { WsJwtAuthGuard } from './guards/ws-jwt-auth.guard';
 
 import { RedisModule } from '../redis/redis.module';
 import { UsersModule } from '../users/users.module';
@@ -23,7 +24,7 @@ import { WalletsModule } from '../wallets/wallets.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtAuthGuard],
-  exports: [JwtAuthGuard],
+  providers: [AuthService, JwtAuthGuard, WsJwtAuthGuard],
+  exports: [JwtAuthGuard, WsJwtAuthGuard],
 })
 export class AuthModule {}

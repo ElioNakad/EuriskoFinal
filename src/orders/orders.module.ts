@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 
+import { AuthModule } from '../auth/auth.module';
 import { RedisModule } from '../redis/redis.module';
 import { Stock, StockSchema } from '../stocks/schemas/stock.schema';
 import { Wallet, WalletSchema } from '../wallets/schemas/wallet.schema';
@@ -13,13 +13,8 @@ import { OrdersService } from './orders.service';
 
 @Module({
   imports: [
+    AuthModule,
     RedisModule,
-    JwtModule.register({
-      secret: process.env.JWT_SECRET,
-      signOptions: {
-        expiresIn: '7d',
-      },
-    }),
     MongooseModule.forFeature([
       {
         name: Stock.name,
