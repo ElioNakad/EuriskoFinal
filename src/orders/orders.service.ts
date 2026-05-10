@@ -227,27 +227,26 @@ export class OrdersService {
         const profitLoss = proceeds - costBasis;
         const isFullClose = sharesToSell === buyOrder.availableShares;
 
-        const buyOrderUpdate =
-          await this.buyOrderModel.collection.updateOne(
-            {
-              _id: buyOrder._id,
-              user_id: userObjectId,
-              availableShares: { $gte: sharesToSell },
-            },
-            isFullClose
-              ? {
-                  $set: {
-                    availableShares: 0,
-                    closedAt,
-                  },
-                }
-              : {
-                  $inc: {
-                    availableShares: -sharesToSell,
-                  },
+        const buyOrderUpdate = await this.buyOrderModel.collection.updateOne(
+          {
+            _id: buyOrder._id,
+            user_id: userObjectId,
+            availableShares: { $gte: sharesToSell },
+          },
+          isFullClose
+            ? {
+                $set: {
+                  availableShares: 0,
+                  closedAt,
                 },
-            { session },
-          );
+              }
+            : {
+                $inc: {
+                  availableShares: -sharesToSell,
+                },
+              },
+          { session },
+        );
 
         if (buyOrderUpdate.modifiedCount !== 1) {
           throw new BadRequestException('Unable to close open order');
