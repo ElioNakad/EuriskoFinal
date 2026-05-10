@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
-import { getModelToken } from '@nestjs/mongoose';
+import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { BadRequestException } from '@nestjs/common';
 import { Types } from 'mongoose';
 
@@ -21,9 +21,11 @@ describe('WalletsService', () => {
   let service: WalletsService;
   let walletModel: {
     findOne: jest.Mock;
+    findOneAndUpdate: jest.Mock;
   };
   let withdrawalRequestModel: {
     create: jest.Mock;
+    exists: jest.Mock;
     find: jest.Mock;
   };
   let walletTransactionModel: {
@@ -37,13 +39,25 @@ describe('WalletsService', () => {
   let sellOrderModel: {
     find: jest.Mock;
   };
+  let dbSession: {
+    withTransaction: jest.Mock;
+    endSession: jest.Mock;
+  };
 
   beforeEach(async () => {
+    dbSession = {
+      withTransaction: jest.fn(async (callback: () => Promise<void>) =>
+        callback(),
+      ),
+      endSession: jest.fn(),
+    };
     walletModel = {
       findOne: jest.fn(),
+      findOneAndUpdate: jest.fn(),
     };
     withdrawalRequestModel = {
       create: jest.fn(),
+      exists: jest.fn(),
       find: jest.fn(),
     };
     walletTransactionModel = {
@@ -80,6 +94,12 @@ describe('WalletsService', () => {
           },
         },
         {
+          provide: getConnectionToken(),
+          useValue: {
+            startSession: jest.fn().mockResolvedValue(dbSession),
+          },
+        },
+        {
           provide: getModelToken(Wallet.name),
           useValue: walletModel,
         },
@@ -109,11 +129,11 @@ describe('WalletsService', () => {
     expect(service).toBeDefined();
   });
 
-  it('rejects withdrawals within 48 hours of the last deposit', async () => {
+  it('rejects withdrawals when the wallet balance is insufficient', async () => {
     walletModel.findOne.mockResolvedValue({
       _id: new Types.ObjectId(),
-      balance: 100,
-      lastDepositAt: new Date(Date.now() - 47 * 60 * 60 * 1000),
+      balance: 25,
+      lastDepositAt: new Date(),
     });
 
     await expect(
@@ -123,14 +143,15 @@ describe('WalletsService', () => {
     expect(withdrawalRequestModel.create).not.toHaveBeenCalled();
   });
 
-  it('creates a pending withdrawal request after 48 hours', async () => {
+  it('creates a pending withdrawal request when funds are available', async () => {
     const walletId = new Types.ObjectId();
 
     walletModel.findOne.mockResolvedValue({
       _id: walletId,
       balance: 100,
-      lastDepositAt: new Date(Date.now() - 49 * 60 * 60 * 1000),
+      lastDepositAt: new Date(),
     });
+    withdrawalRequestModel.exists.mockResolvedValue(null);
     withdrawalRequestModel.create.mockResolvedValue({
       wallet_id: walletId,
       amount: 50,
@@ -150,6 +171,25 @@ describe('WalletsService', () => {
       amount: 50,
       status: WithdrawalRequestStatus.Pending,
     });
+  });
+
+  it('rejects when a withdrawal request is already pending', async () => {
+    const walletId = new Types.ObjectId();
+
+    walletModel.findOne.mockResolvedValue({
+      _id: walletId,
+      balance: 100,
+      lastDepositAt: new Date(),
+    });
+    withdrawalRequestModel.exists.mockResolvedValue({
+      _id: new Types.ObjectId(),
+    });
+
+    await expect(
+      service.requestWithdrawal(new Types.ObjectId().toHexString(), 50),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(withdrawalRequestModel.create).not.toHaveBeenCalled();
   });
 
   it('combines completed wallet withdrawals with pending and rejected withdrawal requests', async () => {

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { Connection, Model, Types } from 'mongoose';
 import Stripe from 'stripe';
 
 import { MailService } from '../mail/mail.service';
@@ -71,6 +71,9 @@ export class WalletsService {
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
     private readonly usersService: UsersService,
+
+    @InjectConnection()
+    private readonly connection: Connection,
 
     @InjectModel(Wallet.name)
     private readonly walletModel: Model<WalletDocument>,
@@ -158,45 +161,65 @@ export class WalletsService {
 
       const amount = Number(session.metadata?.amount);
 
-      if (!userId || Number.isNaN(amount)) {
+      if (!userId || Number.isNaN(amount) || amount <= 0) {
         throw new BadRequestException('Invalid webhook metadata');
       }
 
-      const existingTransaction = await this.walletTransactionModel.exists({
-        reference_id: session.id,
-      });
+      const userObjectId = this.toObjectId(userId, 'Invalid user id');
+      const depositedAt = new Date();
+      const dbSession = await this.connection.startSession();
 
-      if (existingTransaction) {
-        return {
-          received: true,
-        };
-      }
+      try {
+        await dbSession.withTransaction(async () => {
+          const wallet = await this.walletModel.findOneAndUpdate(
+            {
+              userId: userObjectId,
+            },
+            {
+              $inc: {
+                balance: amount,
+              },
+              $set: {
+                lastDepositAt: depositedAt,
+              },
+              $setOnInsert: {
+                userId: userObjectId,
+              },
+            },
+            {
+              new: true,
+              upsert: true,
+              session: dbSession,
+              runValidators: true,
+            },
+          );
 
-      let wallet = await this.walletModel.findOne({
-        userId: new Types.ObjectId(userId),
-      });
-
-      if (!wallet) {
-        wallet = await this.walletModel.create({
-          userId: new Types.ObjectId(userId),
-          balance: amount,
-          lastDepositAt: new Date(),
+          await this.walletTransactionModel.create(
+            [
+              {
+                wallet_id: wallet._id,
+                transaction_type: WalletTransactionType.Deposit,
+                amount,
+                status: WalletTransactionStatus.Completed,
+                reference_id: session.id,
+              },
+            ],
+            {
+              session: dbSession,
+            },
+          );
         });
-      } else {
-        wallet.balance = (wallet.balance ?? 0) + amount;
+      } catch (error) {
+        if (this.isDuplicateKeyError(error)) {
+          return {
+            received: true,
+          };
+        }
 
-        wallet.lastDepositAt = new Date();
-
-        await wallet.save();
+        throw error;
+      } finally {
+        await dbSession.endSession();
       }
-
-      await this.walletTransactionModel.create({
-        wallet_id: wallet._id,
-        transaction_type: WalletTransactionType.Deposit,
-        amount,
-        status: WalletTransactionStatus.Completed,
-        reference_id: session.id,
-      });
 
       // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
       const user = await this.usersService.findById(userId);
@@ -427,11 +450,30 @@ export class WalletsService {
       throw new BadRequestException('Insufficient wallet balance');
     }
 
-    return this.withdrawalRequestModel.create({
+    const existingPendingWithdrawal = await this.withdrawalRequestModel.exists({
       wallet_id: wallet._id,
-      amount,
       status: WithdrawalRequestStatus.Pending,
     });
+
+    if (existingPendingWithdrawal) {
+      throw new BadRequestException('A withdrawal request is already pending');
+    }
+
+    try {
+      return await this.withdrawalRequestModel.create({
+        wallet_id: wallet._id,
+        amount,
+        status: WithdrawalRequestStatus.Pending,
+      });
+    } catch (error) {
+      if (this.isDuplicateKeyError(error)) {
+        throw new BadRequestException(
+          'A withdrawal request is already pending',
+        );
+      }
+
+      throw error;
+    }
   }
 
   private getDateFilter(query: TransactionHistoryQueryDto): {
@@ -489,5 +531,14 @@ export class WalletsService {
     }
 
     return undefined;
+  }
+
+  private isDuplicateKeyError(error: unknown): boolean {
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error as { code?: unknown }).code === 11000
+    );
   }
 }

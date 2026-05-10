@@ -42,3 +42,16 @@ export class WithdrawalRequest {
 
 export const WithdrawalRequestSchema =
   SchemaFactory.createForClass(WithdrawalRequest);
+
+WithdrawalRequestSchema.index(
+  {
+    wallet_id: 1,
+    status: 1,
+  },
+  {
+    unique: true,
+    partialFilterExpression: {
+      status: WithdrawalRequestStatus.Pending,
+    },
+  },
+);

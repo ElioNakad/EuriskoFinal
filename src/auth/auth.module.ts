@@ -25,6 +25,6 @@ import { WalletsModule } from '../wallets/wallets.module';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtAuthGuard, WsJwtAuthGuard],
-  exports: [JwtAuthGuard, WsJwtAuthGuard],
+  exports: [JwtModule, JwtAuthGuard, WsJwtAuthGuard],
 })
 export class AuthModule {}
