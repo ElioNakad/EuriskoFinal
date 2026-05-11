@@ -9,6 +9,7 @@ import { WalletsModule } from './wallets/wallets.module';
 import { OrdersModule } from './orders/orders.module';
 import { RabbitMqModule } from './rabbitmq/rabbitmq.module';
 import { StockAlertsModule } from './stock-alerts/stock-alerts.module';
+import { CmsModule } from './cms/cms.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { StockAlertsModule } from './stock-alerts/stock-alerts.module';
     OrdersModule,
     RabbitMqModule,
     StockAlertsModule,
+    CmsModule,
   ],
 })
 export class AppModule {}

@@ -73,4 +73,26 @@ export class MailService {
       );
     }
   }
+
+  async sendCmsTemporaryPassword(
+    email: string,
+    fullName: string,
+    temporaryPassword: string,
+  ): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: process.env.EMAIL,
+        to: email,
+        subject: 'Your CMS account temporary password',
+        text: `Hello ${fullName}, your CMS account has been created. Your temporary password is ${temporaryPassword}`,
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Failed to send CMS temporary password email',
+        {
+          cause: error,
+        },
+      );
+    }
+  }
 }

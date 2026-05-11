@@ -4,5 +4,7 @@ export type AuthenticatedSocket = Socket & {
   user?: {
     userId: string;
     email: string;
+    role?: string;
+    accountType?: string;
   };
 };

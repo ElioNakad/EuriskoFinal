@@ -6,6 +6,8 @@ import { AuthenticatedSocket } from '../types/authenticated-socket.type';
 interface JwtPayload {
   sub: string;
   email: string;
+  role?: string;
+  accountType?: string;
 }
 
 @Injectable()
@@ -38,6 +40,8 @@ export class WsJwtAuthGuard implements CanActivate {
       client.user = {
         userId: payload.sub,
         email: payload.email,
+        role: payload.role,
+        accountType: payload.accountType,
       };
 
       return true;
