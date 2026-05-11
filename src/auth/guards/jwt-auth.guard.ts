@@ -7,6 +7,8 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
 
+import { UsersService } from '../../users/users.service';
+
 interface JwtPayload {
   sub: string;
   email: string;
@@ -25,7 +27,10 @@ type AuthenticatedRequest = Request & {
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly usersService: UsersService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
@@ -39,6 +44,14 @@ export class JwtAuthGuard implements CanActivate {
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token, {
         secret: process.env.JWT_SECRET,
       });
+
+      if (payload.accountType === 'member') {
+        const user = await this.usersService.findById(payload.sub);
+
+        if (!user?.isActive) {
+          throw new UnauthorizedException('Account is inactive');
+        }
+      }
 
       request.user = {
         userId: payload.sub,
