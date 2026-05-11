@@ -11,6 +11,7 @@ import { MailService } from '../mail/mail.service';
 import { RedisService } from '../redis/redis.service';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
+import { CmsService } from '../cms/cms.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { SetPasswordDto } from './dto/set-password.dto';
@@ -32,6 +33,7 @@ export class AuthService {
     private readonly mailService: MailService,
     private readonly jwtService: JwtService,
     private readonly walletService: WalletsService,
+    private readonly cmsService: CmsService,
   ) {}
 
   async register(dto: RegisterDto) {
@@ -42,8 +44,9 @@ export class AuthService {
     }
 
     const existingUser = await this.usersService.findByEmail(dto.email);
+    const existingCmsAccount = await this.cmsService.findByEmail(dto.email);
 
-    if (existingUser) {
+    if (existingUser || existingCmsAccount) {
       throw new BadRequestException('Email already exists');
     }
 
@@ -104,6 +107,12 @@ export class AuthService {
       throw new BadRequestException('Verification expired');
     }
 
+    const existingCmsAccount = await this.cmsService.findByEmail(dto.email);
+
+    if (existingCmsAccount) {
+      throw new BadRequestException('Email already exists');
+    }
+
     const hashedPassword = await bcrypt.hash(dto.password, 10);
 
     const user = await this.usersService.create({
@@ -158,32 +167,71 @@ export class AuthService {
   async login(dto: LoginDto) {
     const user = await this.usersService.findByEmail(dto.email);
 
-    if (!user) {
+    if (user) {
+      const passwordMatch = await bcrypt.compare(dto.password, user.password);
+
+      if (!passwordMatch) {
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      const payload = {
+        sub: user._id,
+        email: user.email,
+        role: user.role,
+        accountType: 'member',
+      };
+
+      const accessToken = await this.jwtService.signAsync(payload);
+
+      const hasWallet = await this.walletService.hasWallet(user._id.toString());
+      return {
+        message: 'Login successful',
+        accessToken,
+        requiresWalletFunding: !hasWallet,
+        accountType: 'member',
+        user: {
+          id: user._id,
+          fullName: user.fullName,
+          email: user.email,
+          role: user.role,
+        },
+      };
+    }
+
+    const cmsAccount = await this.cmsService.findByEmail(dto.email);
+
+    if (!cmsAccount || !cmsAccount.isActive) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const passwordMatch = await bcrypt.compare(dto.password, user.password);
+    const passwordMatch = await bcrypt.compare(
+      dto.password,
+      cmsAccount.password,
+    );
 
     if (!passwordMatch) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const payload = {
-      sub: user._id,
-      email: user.email,
+      sub: cmsAccount._id,
+      email: cmsAccount.email,
+      role: cmsAccount.role,
+      accountType: 'cms',
     };
 
     const accessToken = await this.jwtService.signAsync(payload);
 
-    const hasWallet = await this.walletService.hasWallet(user._id.toString());
     return {
       message: 'Login successful',
       accessToken,
-      requiresWalletFunding: !hasWallet,
+      accountType: 'cms',
       user: {
-        id: user._id,
-        fullName: user.fullName,
-        email: user.email,
+        id: cmsAccount._id,
+        fullName: cmsAccount.fullName,
+        email: cmsAccount.email,
+        role: cmsAccount.role,
+        mustChangePassword: cmsAccount.mustChangePassword,
       },
     };
   }

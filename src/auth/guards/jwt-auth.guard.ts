@@ -10,12 +10,16 @@ import { Request } from 'express';
 interface JwtPayload {
   sub: string;
   email: string;
+  role?: string;
+  accountType?: string;
 }
 
 type AuthenticatedRequest = Request & {
   user?: {
     userId: string;
     email: string;
+    role?: string;
+    accountType?: string;
   };
 };
 
@@ -39,6 +43,8 @@ export class JwtAuthGuard implements CanActivate {
       request.user = {
         userId: payload.sub,
         email: payload.email,
+        role: payload.role,
+        accountType: payload.accountType,
       };
     } catch {
       throw new UnauthorizedException();

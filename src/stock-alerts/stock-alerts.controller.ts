@@ -41,4 +41,3 @@ export class StockAlertsController {
     return this.stockAlertsService.cancel(request.user.userId, id);
   }
 }
-
