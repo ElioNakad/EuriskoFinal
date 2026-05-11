@@ -168,6 +168,10 @@ export class AuthService {
     const user = await this.usersService.findByEmail(dto.email);
 
     if (user) {
+      if (!user.isActive) {
+        throw new UnauthorizedException('Account is inactive');
+      }
+
       const passwordMatch = await bcrypt.compare(dto.password, user.password);
 
       if (!passwordMatch) {
