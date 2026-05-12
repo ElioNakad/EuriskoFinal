@@ -511,6 +511,35 @@ export class WalletsService {
     );
   }
 
+  async getPendingWithdrawalRequestsForCms() {
+    const filter = {
+      status: WithdrawalRequestStatus.Pending,
+    };
+
+    const [total, requests] = await Promise.all([
+      this.withdrawalRequestModel.countDocuments(filter),
+      this.withdrawalRequestModel
+        .find(filter)
+        .populate({
+          path: 'wallet_id',
+          select: 'userId balance lastDepositAt createdAt updatedAt',
+          populate: {
+            path: 'userId',
+            select: 'fullName email nationalId isActive',
+          },
+        })
+        .sort({ createdAt: -1 })
+        .lean(),
+    ]);
+
+    return {
+      total,
+      withdrawalRequests: requests.map((request) =>
+        this.toCmsWithdrawalRequestResponse(request),
+      ),
+    };
+  }
+
   async updateWithdrawalRequestStatus(
     requestId: string,
     status: WithdrawalRequestStatus,

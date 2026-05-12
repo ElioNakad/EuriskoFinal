@@ -170,6 +170,31 @@ describe('StocksService', () => {
     );
   });
 
+  it('should delist a stock by ticker', async () => {
+    const previousStock = { ticker: 'AAPL', currentPrice: 200, isListed: true };
+    const delistedStock = { ticker: 'AAPL', currentPrice: 200, isListed: false };
+
+    stockModel.findOne.mockReturnValue({
+      exec: jest.fn().mockResolvedValue(previousStock),
+    });
+    stockModel.findOneAndUpdate.mockReturnValue({
+      exec: jest.fn().mockResolvedValue(delistedStock),
+    });
+
+    await expect(service.delist('AAPL')).resolves.toBe(delistedStock);
+    expect(stockModel.findOneAndUpdate).toHaveBeenCalledWith(
+      {
+        ticker: /^AAPL$/i,
+      },
+      { isListed: false },
+      {
+        new: true,
+        runValidators: true,
+      },
+    );
+    expect(rabbitMqService.publish).not.toHaveBeenCalled();
+  });
+
   it('should throw when updating a missing stock', async () => {
     stockModel.findOne.mockReturnValue({
       exec: jest.fn().mockResolvedValue(null),

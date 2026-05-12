@@ -95,6 +95,12 @@ export class CmsController {
   }
 
   @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
+  @Get('withdrawal-requests/pending-review')
+  getPendingWithdrawalRequests() {
+    return this.walletsService.getPendingWithdrawalRequestsForCms();
+  }
+
+  @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
   @Patch('withdrawal-requests/:requestId/status')
   updateWithdrawalRequestStatus(
     @Param('requestId') requestId: string,

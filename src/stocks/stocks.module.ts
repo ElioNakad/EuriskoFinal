@@ -3,6 +3,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CmsAnalystGuard } from '../cms/guards/cms-analyst.guard';
 import { RabbitMqModule } from '../rabbitmq/rabbitmq.module';
 import { UsersModule } from '../users/users.module';
 import { StocksController } from './stocks.controller';
@@ -36,6 +37,6 @@ import {
     ]),
   ],
   controllers: [StocksController],
-  providers: [StocksService, JwtAuthGuard],
+  providers: [StocksService, JwtAuthGuard, CmsAnalystGuard],
 })
 export class StocksModule {}

@@ -28,6 +28,7 @@ describe('WalletsService', () => {
     findOneAndUpdate: jest.Mock;
   };
   let withdrawalRequestModel: {
+    countDocuments: jest.Mock;
     create: jest.Mock;
     exists: jest.Mock;
     find: jest.Mock;
@@ -63,6 +64,7 @@ describe('WalletsService', () => {
       findOneAndUpdate: jest.fn(),
     };
     withdrawalRequestModel = {
+      countDocuments: jest.fn(),
       create: jest.fn(),
       exists: jest.fn(),
       find: jest.fn(),
@@ -289,5 +291,73 @@ describe('WalletsService', () => {
     });
     expect(buyOrderModel.find).not.toHaveBeenCalled();
     expect(sellOrderModel.find).not.toHaveBeenCalled();
+  });
+
+  it('returns pending withdrawal requests with their total for cms review', async () => {
+    const requestId = new Types.ObjectId();
+    const walletId = new Types.ObjectId();
+    const memberId = new Types.ObjectId();
+    const createdAt = new Date('2026-01-04T00:00:00.000Z');
+
+    withdrawalRequestModel.countDocuments.mockResolvedValue(1);
+    withdrawalRequestModel.find.mockReturnValue({
+      populate: jest.fn().mockReturnThis(),
+      sort: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockResolvedValue([
+        {
+          _id: requestId,
+          wallet_id: {
+            _id: walletId,
+            balance: 250,
+            lastDepositAt: createdAt,
+            userId: {
+              _id: memberId,
+              fullName: 'Jane Member',
+              email: 'jane@example.com',
+              nationalId: 'NAT-123',
+              isActive: true,
+            },
+          },
+          amount: 75,
+          status: WithdrawalRequestStatus.Pending,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      ]),
+    });
+
+    await expect(service.getPendingWithdrawalRequestsForCms()).resolves.toEqual({
+      total: 1,
+      withdrawalRequests: [
+        {
+          id: requestId,
+          amount: 75,
+          status: WithdrawalRequestStatus.Pending,
+          createdAt,
+          updatedAt: createdAt,
+          wallet: {
+            id: walletId,
+            balance: 250,
+            lastDepositAt: createdAt,
+            createdAt: undefined,
+            updatedAt: undefined,
+          },
+          member: {
+            id: memberId,
+            fullName: 'Jane Member',
+            email: 'jane@example.com',
+            nationalId: 'NAT-123',
+            isActive: true,
+          },
+        },
+      ],
+    });
+
+    expect(withdrawalRequestModel.countDocuments).toHaveBeenCalledWith({
+      status: WithdrawalRequestStatus.Pending,
+    });
+    expect(withdrawalRequestModel.find).toHaveBeenCalledWith({
+      status: WithdrawalRequestStatus.Pending,
+    });
   });
 });
