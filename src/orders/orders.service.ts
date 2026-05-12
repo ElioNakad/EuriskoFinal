@@ -3,12 +3,14 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
-import { Connection, Model, Types } from 'mongoose';
+import { ClientSession, Connection, Model, Types } from 'mongoose';
 
 import { RedisService } from '../redis/redis.service';
 import { Stock, StockDocument } from '../stocks/schemas/stock.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 import { Wallet, WalletDocument } from '../wallets/schemas/wallet.schema';
 import { CloseMarketSellOrderDto } from './dto/close-market-sell-order.dto';
 import { PlaceMarketBuyOrderDto } from './dto/place-market-buy-order.dto';
@@ -66,6 +68,9 @@ export class OrdersService {
     @InjectModel(Wallet.name)
     private readonly walletModel: Model<WalletDocument>,
 
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
+
     @InjectModel(BuyOrder.name)
     private readonly buyOrderModel: Model<BuyOrderDocument>,
 
@@ -89,6 +94,8 @@ export class OrdersService {
       let order: BuyOrderDocument | undefined;
 
       await session.withTransaction(async () => {
+        await this.assertActiveMemberForTrading(userObjectId, session);
+
         const stock = await this.stockModel
           .findOne({
             _id: stockObjectId,
@@ -186,6 +193,8 @@ export class OrdersService {
       let sellOrder: SellOrderDocument | undefined;
 
       await session.withTransaction(async () => {
+        await this.assertActiveMemberForTrading(userObjectId, session);
+
         const buyOrder = await this.buyOrderModel
           .findOne({
             _id: orderObjectId,
@@ -432,6 +441,28 @@ export class OrdersService {
 
   private getPortfolioSummaryCacheKey(userId: string): string {
     return `portfolio-summary:${userId}`;
+  }
+
+  private async assertActiveMemberForTrading(
+    userObjectId: Types.ObjectId,
+    session: ClientSession,
+  ): Promise<void> {
+    const activeUserUpdate = await this.userModel.collection.updateOne(
+      {
+        _id: userObjectId,
+        isActive: true,
+      },
+      {
+        $currentDate: {
+          lastTradingActivityAt: true,
+        },
+      },
+      { session },
+    );
+
+    if (activeUserUpdate.matchedCount !== 1) {
+      throw new UnauthorizedException('Account is inactive');
+    }
   }
 
   private toObjectId(value: string, errorMessage: string): Types.ObjectId {

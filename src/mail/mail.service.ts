@@ -50,6 +50,42 @@ export class MailService {
     }
   }
 
+  async sendWithdrawalApproved(email: string, amount: number): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: process.env.EMAIL,
+        to: email,
+        subject: 'Withdrawal Approved',
+        text: `We transferred $${amount} to your bank account.`,
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Failed to send withdrawal approval email',
+        {
+          cause: error,
+        },
+      );
+    }
+  }
+
+  async sendWithdrawalRejected(email: string, amount: number): Promise<void> {
+    try {
+      await this.transporter.sendMail({
+        from: process.env.EMAIL,
+        to: email,
+        subject: 'Withdrawal Not Accepted',
+        text: `Your withdrawal request for $${amount} was not accepted.`,
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Failed to send withdrawal rejection email',
+        {
+          cause: error,
+        },
+      );
+    }
+  }
+
   async sendStockAlertTriggered(
     email: string,
     ticker: string,

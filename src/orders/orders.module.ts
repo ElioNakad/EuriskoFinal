@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { AuthModule } from '../auth/auth.module';
 import { RedisModule } from '../redis/redis.module';
 import { Stock, StockSchema } from '../stocks/schemas/stock.schema';
+import { User, UserSchema } from '../users/schemas/user.schema';
 import { UsersModule } from '../users/users.module';
 import { Wallet, WalletSchema } from '../wallets/schemas/wallet.schema';
 import { BuyOrder, BuyOrderSchema } from './schemas/buy-order.schema';
@@ -25,6 +26,10 @@ import { OrdersService } from './orders.service';
       {
         name: Wallet.name,
         schema: WalletSchema,
+      },
+      {
+        name: User.name,
+        schema: UserSchema,
       },
       {
         name: BuyOrder.name,

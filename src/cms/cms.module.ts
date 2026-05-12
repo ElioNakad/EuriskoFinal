@@ -4,6 +4,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 
 import { MailModule } from '../mail/mail.module';
 import { UsersModule } from '../users/users.module';
+import { WalletsModule } from '../wallets/wallets.module';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CmsController } from './cms.controller';
 import { CmsService } from './cms.service';
@@ -25,6 +26,7 @@ import { CmsAccount, CmsAccountSchema } from './schemas/cms-account.schema';
     }),
     MailModule,
     UsersModule,
+    WalletsModule,
   ],
   controllers: [CmsController],
   providers: [CmsService, JwtAuthGuard],

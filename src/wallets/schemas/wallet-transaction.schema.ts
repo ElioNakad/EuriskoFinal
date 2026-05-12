@@ -4,6 +4,8 @@ import { HydratedDocument, Types } from 'mongoose';
 export enum WalletTransactionType {
   Deposit = 'deposit',
   Withdrawal = 'withdrawal',
+  ManualCredit = 'manual_credit',
+  ManualDebit = 'manual_debit',
 }
 
 export enum WalletTransactionStatus {
