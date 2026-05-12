@@ -35,6 +35,8 @@ export class Stock {
 
 export const StockSchema = SchemaFactory.createForClass(Stock);
 
+StockSchema.index({ ticker: 1, isListed: 1 });
+
 const STOCK_HISTORY_COLLECTION = 'stock_history';
 const HISTORY_SINGLE_DOCUMENT_OPERATIONS = [
   'findOneAndUpdate',

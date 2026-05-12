@@ -2,6 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 
+import {
+  getPagination,
+  PaginationQueryDto,
+} from '../common/dto/pagination-query.dto';
 import { CreateStockDto } from './dto/create-stock.dto';
 import { UpdateStockDto } from './dto/update-stock.dto';
 import {
@@ -31,11 +35,26 @@ export class StocksService {
     });
   }
 
-  async findAll() {
-    return this.stockModel.find().exec();
+  async findAll(query: PaginationQueryDto = {}) {
+    const { page, limit, skip } = getPagination(query);
+    const stocks = await this.stockModel
+      .find()
+      .sort({ ticker: 1 })
+      .skip(skip)
+      .limit(limit + 1)
+      .lean()
+      .exec();
+
+    return {
+      data: stocks.slice(0, limit),
+      page,
+      limit,
+      hasMore: stocks.length > limit,
+    };
   }
 
-  async findByName(name: string) {
+  async findByName(name: string, query: PaginationQueryDto = {}) {
+    const { page, limit, skip } = getPagination(query);
     const stock = await this.stockModel
       .findOne({
         ticker: new RegExp(`^${this.escapeRegExp(name)}$`, 'i'),
@@ -49,11 +68,19 @@ export class StocksService {
     const stockHistory = await this.stockHistoryModel
       .find({ stockId: stock._id })
       .sort({ changedAt: -1 })
+      .skip(skip)
+      .limit(limit + 1)
+      .lean()
       .exec();
 
     return {
       ...stock.toObject(),
-      stockHistory,
+      stockHistory: {
+        data: stockHistory.slice(0, limit),
+        page,
+        limit,
+        hasMore: stockHistory.length > limit,
+      },
     };
   }
 

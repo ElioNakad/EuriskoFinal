@@ -54,3 +54,6 @@ export class BuyOrder {
 }
 
 export const BuyOrderSchema = SchemaFactory.createForClass(BuyOrder);
+
+BuyOrderSchema.index({ user_id: 1, availableShares: 1, createdAt: -1 });
+BuyOrderSchema.index({ user_id: 1, createdAt: -1 });

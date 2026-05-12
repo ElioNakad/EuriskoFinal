@@ -19,3 +19,5 @@ export class StockHistory {
 }
 
 export const StockHistorySchema = SchemaFactory.createForClass(StockHistory);
+
+StockHistorySchema.index({ stockId: 1, changedAt: -1 });

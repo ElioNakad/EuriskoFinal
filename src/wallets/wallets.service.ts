@@ -17,6 +17,10 @@ import {
   AuditTrailDocument,
 } from '../cms/schemas/audit-trail.schema';
 import { MailService } from '../mail/mail.service';
+import {
+  getPagination,
+  PaginationQueryDto,
+} from '../common/dto/pagination-query.dto';
 import { BuyOrder, BuyOrderDocument } from '../orders/schemas/buy-order.schema';
 import {
   SellOrder,
@@ -63,6 +67,13 @@ export interface TransactionHistoryItem {
   total?: number;
   proceeds?: number;
   profitLoss?: number;
+}
+
+export interface TransactionHistoryResponse {
+  data: TransactionHistoryItem[];
+  page: number;
+  limit: number;
+  hasMore: boolean;
 }
 
 type TimestampedDocument<T> = T & {
@@ -266,8 +277,10 @@ export class WalletsService {
   async getTransactionHistory(
     userId: string,
     query: TransactionHistoryQueryDto,
-  ): Promise<TransactionHistoryItem[]> {
+  ): Promise<TransactionHistoryResponse> {
     const userObjectId = this.toObjectId(userId, 'Invalid user id');
+    const { page, limit, skip } = getPagination(query);
+    const fetchLimit = skip + limit + 1;
     const dateFilter = this.getDateFilter(query);
     const wallet = await this.walletModel.findOne({
       userId: userObjectId,
@@ -302,6 +315,8 @@ export class WalletsService {
               transaction_type: transactionTypeFilter,
               ...this.createdAtCondition(dateFilter),
             })
+            .sort({ createdAt: -1 })
+            .limit(fetchLimit)
             .lean()
             .then((transactions) =>
               transactions.map((transaction) => {
@@ -342,6 +357,8 @@ export class WalletsService {
             },
             ...this.createdAtCondition(dateFilter),
           })
+          .sort({ createdAt: -1 })
+          .limit(fetchLimit)
           .lean()
           .then((withdrawals) =>
             withdrawals.map((withdrawal) => {
@@ -370,6 +387,8 @@ export class WalletsService {
             user_id: userObjectId,
             ...this.createdAtCondition(dateFilter),
           })
+          .sort({ createdAt: -1 })
+          .limit(fetchLimit)
           .lean()
           .then((orders) =>
             orders.map((order) => {
@@ -399,6 +418,8 @@ export class WalletsService {
             user_id: userObjectId,
             ...this.soldAtCondition(dateFilter),
           })
+          .sort({ soldAt: -1 })
+          .limit(fetchLimit)
           .lean()
           .then((orders) =>
             orders.map((order) => {
@@ -425,11 +446,16 @@ export class WalletsService {
       );
     }
 
-    const history = (await Promise.all(historyQueries)).flat();
-
-    return history.sort(
+    const history = (await Promise.all(historyQueries)).flat().sort(
       (left, right) => right.createdAt.getTime() - left.createdAt.getTime(),
     );
+
+    return {
+      data: history.slice(skip, skip + limit),
+      page,
+      limit,
+      hasMore: history.length > skip + limit,
+    };
   }
 
   async requestWithdrawal(
@@ -492,7 +518,8 @@ export class WalletsService {
     }
   }
 
-  async getWithdrawalRequestsForCms() {
+  async getWithdrawalRequestsForCms(query: PaginationQueryDto = {}) {
+    const { page, limit, skip } = getPagination(query);
     const requests = await this.withdrawalRequestModel
       .find()
       .populate({
@@ -504,14 +531,24 @@ export class WalletsService {
         },
       })
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit + 1)
       .lean();
 
-    return requests.map((request) =>
-      this.toCmsWithdrawalRequestResponse(request),
-    );
+    return {
+      data: requests
+        .slice(0, limit)
+        .map((request) => this.toCmsWithdrawalRequestResponse(request)),
+      page,
+      limit,
+      hasMore: requests.length > limit,
+    };
   }
 
-  async getPendingWithdrawalRequestsForCms() {
+  async getPendingWithdrawalRequestsForCms(
+    query: PaginationQueryDto = {},
+  ) {
+    const { page, limit, skip } = getPagination(query);
     const filter = {
       status: WithdrawalRequestStatus.Pending,
     };
@@ -529,11 +566,15 @@ export class WalletsService {
           },
         })
         .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
         .lean(),
     ]);
 
     return {
       total,
+      page,
+      limit,
       withdrawalRequests: requests.map((request) =>
         this.toCmsWithdrawalRequestResponse(request),
       ),

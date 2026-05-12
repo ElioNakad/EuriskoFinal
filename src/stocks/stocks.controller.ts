@@ -5,8 +5,10 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CmsAnalystGuard } from '../cms/guards/cms-analyst.guard';
 import { CreateStockDto } from './dto/create-stock.dto';
@@ -25,14 +27,14 @@ export class StocksController {
 
   @UseGuards(JwtAuthGuard)
   @Get()
-  findAll() {
-    return this.stocksService.findAll();
+  findAll(@Query() query: PaginationQueryDto) {
+    return this.stocksService.findAll(query);
   }
 
   @UseGuards(JwtAuthGuard)
   @Get(':name')
-  findByName(@Param('name') name: string) {
-    return this.stocksService.findByName(name);
+  findByName(@Param('name') name: string, @Query() query: PaginationQueryDto) {
+    return this.stocksService.findByName(name, query);
   }
 
   @UseGuards(JwtAuthGuard, CmsAnalystGuard)
