@@ -32,6 +32,9 @@ export class User {
 
   @Prop({ default: true })
   isActive!: boolean;
+
+  @Prop()
+  lastTradingActivityAt?: Date;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

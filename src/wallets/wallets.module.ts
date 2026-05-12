@@ -3,6 +3,10 @@ import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import {
+  AuditTrail,
+  AuditTrailSchema,
+} from '../cms/schemas/audit-trail.schema';
 import { MailModule } from '../mail/mail.module';
 import { UsersModule } from '../users/users.module';
 import { WalletsController } from './wallets.controller';
@@ -45,6 +49,10 @@ import {
       {
         name: WalletTransaction.name,
         schema: WalletTransactionSchema,
+      },
+      {
+        name: AuditTrail.name,
+        schema: AuditTrailSchema,
       },
       {
         name: BuyOrder.name,

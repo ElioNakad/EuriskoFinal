@@ -1,9 +1,21 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
+import { randomUUID } from 'crypto';
 import { Connection, Model, Types } from 'mongoose';
 import Stripe from 'stripe';
 
+import { ManualWalletAdjustmentDirection } from '../cms/dto/manual-wallet-adjustment.dto';
+import {
+  AuditTrail,
+  AuditTrailAction,
+  AuditTrailDocument,
+} from '../cms/schemas/audit-trail.schema';
 import { MailService } from '../mail/mail.service';
 import { BuyOrder, BuyOrderDocument } from '../orders/schemas/buy-order.schema';
 import {
@@ -83,6 +95,9 @@ export class WalletsService {
 
     @InjectModel(WalletTransaction.name)
     private readonly walletTransactionModel: Model<WalletTransactionDocument>,
+
+    @InjectModel(AuditTrail.name)
+    private readonly auditTrailModel: Model<AuditTrailDocument>,
 
     @InjectModel(BuyOrder.name)
     private readonly buyOrderModel: Model<BuyOrderDocument>,
@@ -221,13 +236,10 @@ export class WalletsService {
         await dbSession.endSession();
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call
       const user = await this.usersService.findById(userId);
 
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
       if (user?.email) {
         try {
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access
           await this.mailService.sendPaymentSuccess(user.email, amount);
         } catch (error) {
           this.logger.error(
@@ -277,6 +289,8 @@ export class WalletsService {
             $in: [
               WalletTransactionType.Deposit,
               WalletTransactionType.Withdrawal,
+              WalletTransactionType.ManualCredit,
+              WalletTransactionType.ManualDebit,
             ],
           };
 
@@ -298,7 +312,9 @@ export class WalletsService {
                   id: transactionWithTimestamps._id.toString(),
                   type:
                     transactionWithTimestamps.transaction_type ===
-                    WalletTransactionType.Withdrawal
+                      WalletTransactionType.Withdrawal ||
+                    transactionWithTimestamps.transaction_type ===
+                      WalletTransactionType.ManualDebit
                       ? TransactionHistoryType.Withdrawal
                       : TransactionHistoryType.Deposit,
                   status: transactionWithTimestamps.status,
@@ -476,6 +492,360 @@ export class WalletsService {
     }
   }
 
+  async getWithdrawalRequestsForCms() {
+    const requests = await this.withdrawalRequestModel
+      .find()
+      .populate({
+        path: 'wallet_id',
+        select: 'userId balance lastDepositAt createdAt updatedAt',
+        populate: {
+          path: 'userId',
+          select: 'fullName email nationalId isActive',
+        },
+      })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return requests.map((request) =>
+      this.toCmsWithdrawalRequestResponse(request),
+    );
+  }
+
+  async updateWithdrawalRequestStatus(
+    requestId: string,
+    status: WithdrawalRequestStatus,
+  ) {
+    const requestObjectId = this.toObjectId(
+      requestId,
+      'Invalid withdrawal request id',
+    );
+
+    if (
+      status !== WithdrawalRequestStatus.Approved &&
+      status !== WithdrawalRequestStatus.Rejected
+    ) {
+      throw new BadRequestException('Unsupported withdrawal request status');
+    }
+
+    const dbSession = await this.connection.startSession();
+    let updatedWithdrawal: WithdrawalRequestDocument | null = null;
+    let updatedWallet: WalletDocument | null = null;
+    let walletTransaction: WalletTransactionDocument | undefined;
+
+    try {
+      await dbSession.withTransaction(async () => {
+        const withdrawal = await this.withdrawalRequestModel
+          .findOne({
+            _id: requestObjectId,
+            status: WithdrawalRequestStatus.Pending,
+          })
+          .session(dbSession);
+
+        if (!withdrawal) {
+          throw new BadRequestException(
+            'Withdrawal request is not pending or does not exist',
+          );
+        }
+
+        const amount = withdrawal.amount ?? 0;
+
+        if (status === WithdrawalRequestStatus.Approved) {
+          updatedWallet = await this.walletModel.findOneAndUpdate(
+            {
+              _id: withdrawal.wallet_id,
+              balance: {
+                $gte: amount,
+              },
+            },
+            {
+              $inc: {
+                balance: -amount,
+              },
+            },
+            {
+              new: true,
+              session: dbSession,
+              runValidators: true,
+            },
+          );
+
+          if (!updatedWallet) {
+            throw new BadRequestException('Insufficient wallet balance');
+          }
+
+          [walletTransaction] = await this.walletTransactionModel.create(
+            [
+              {
+                wallet_id: withdrawal.wallet_id,
+                transaction_type: WalletTransactionType.Withdrawal,
+                amount,
+                status: WalletTransactionStatus.Completed,
+                reference_id: `withdrawal_request:${requestObjectId.toString()}`,
+              },
+            ],
+            {
+              session: dbSession,
+            },
+          );
+        }
+
+        updatedWithdrawal = await this.withdrawalRequestModel.findOneAndUpdate(
+          {
+            _id: requestObjectId,
+            status: WithdrawalRequestStatus.Pending,
+          },
+          {
+            $set: {
+              status,
+            },
+          },
+          {
+            new: true,
+            session: dbSession,
+            runValidators: true,
+          },
+        );
+
+        if (!updatedWithdrawal) {
+          throw new BadRequestException('Withdrawal request is not pending');
+        }
+      });
+    } finally {
+      await dbSession.endSession();
+    }
+
+    const finalWithdrawal =
+      updatedWithdrawal as unknown as WithdrawalRequestDocument;
+    const wallet =
+      (updatedWallet as WalletDocument | null) ??
+      (await this.walletModel.findOne({
+        _id: finalWithdrawal.wallet_id,
+      }));
+    const memberId = wallet?.userId?.toString();
+    const member = memberId ? await this.usersService.findById(memberId) : null;
+    const amount = finalWithdrawal.amount ?? 0;
+
+    if (member?.email) {
+      try {
+        if (status === WithdrawalRequestStatus.Approved) {
+          await this.mailService.sendWithdrawalApproved(member.email, amount);
+        } else {
+          await this.mailService.sendWithdrawalRejected(member.email, amount);
+        }
+      } catch (error) {
+        this.logger.error(
+          'Failed to send withdrawal status email',
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+    }
+
+    return {
+      message:
+        status === WithdrawalRequestStatus.Approved
+          ? 'Withdrawal request approved successfully'
+          : 'Withdrawal request rejected successfully',
+      withdrawalRequest: {
+        id: finalWithdrawal._id,
+        wallet_id: finalWithdrawal.wallet_id,
+        amount: finalWithdrawal.amount,
+        status: finalWithdrawal.status,
+      },
+      wallet: wallet
+        ? {
+            id: wallet._id,
+            memberId: wallet.userId,
+            balance: wallet.balance,
+          }
+        : null,
+      transaction: walletTransaction
+        ? {
+            id: walletTransaction._id,
+            wallet_id: walletTransaction.wallet_id,
+            transaction_type: walletTransaction.transaction_type,
+            amount: walletTransaction.amount,
+            status: walletTransaction.status,
+            reference_id: walletTransaction.reference_id,
+          }
+        : null,
+    };
+  }
+
+  async adjustMemberWalletBalance(
+    memberId: string,
+    data: {
+      direction: ManualWalletAdjustmentDirection;
+      amount: number;
+      reason: string;
+    },
+    performedByAdminId: string,
+  ) {
+    const memberObjectId = this.toObjectId(memberId, 'Invalid member id');
+    const adminObjectId = this.toObjectId(
+      performedByAdminId,
+      'Invalid admin id',
+    );
+    const amount = Number(data.amount);
+    const reason = data.reason.trim();
+
+    if (amount <= 0) {
+      throw new BadRequestException('Amount must be greater than 0');
+    }
+
+    if (!reason) {
+      throw new BadRequestException('Reason is required');
+    }
+
+    const member = await this.usersService.findById(memberId);
+
+    if (!member) {
+      throw new NotFoundException('Member account not found');
+    }
+
+    if (member.role !== 'member') {
+      throw new BadRequestException('Target account must be a member');
+    }
+
+    const dbSession = await this.connection.startSession();
+
+    try {
+      let wallet: WalletDocument | null = null;
+      let adjustedWalletId: Types.ObjectId | undefined;
+      let walletTransaction: WalletTransactionDocument | undefined;
+      let auditTrail: AuditTrailDocument | undefined;
+      let balanceBefore = 0;
+      let balanceAfter = 0;
+
+      await dbSession.withTransaction(async () => {
+        if (data.direction === ManualWalletAdjustmentDirection.Credit) {
+          wallet = await this.walletModel.findOneAndUpdate(
+            {
+              userId: memberObjectId,
+            },
+            {
+              $inc: {
+                balance: amount,
+              },
+              $setOnInsert: {
+                userId: memberObjectId,
+              },
+            },
+            {
+              new: true,
+              upsert: true,
+              session: dbSession,
+              runValidators: true,
+            },
+          );
+
+          if (!wallet) {
+            throw new NotFoundException('Wallet not found');
+          }
+
+          balanceAfter = wallet.balance ?? 0;
+          balanceBefore = balanceAfter - amount;
+        } else {
+          wallet = await this.walletModel.findOneAndUpdate(
+            {
+              userId: memberObjectId,
+              balance: {
+                $gte: amount,
+              },
+            },
+            {
+              $inc: {
+                balance: -amount,
+              },
+            },
+            {
+              new: true,
+              session: dbSession,
+              runValidators: true,
+            },
+          );
+
+          if (!wallet) {
+            throw new BadRequestException('Insufficient wallet balance');
+          }
+
+          balanceAfter = wallet.balance ?? 0;
+          balanceBefore = balanceAfter + amount;
+        }
+
+        const adjustedWallet = wallet;
+        adjustedWalletId = adjustedWallet._id;
+
+        const transactionType =
+          data.direction === ManualWalletAdjustmentDirection.Credit
+            ? WalletTransactionType.ManualCredit
+            : WalletTransactionType.ManualDebit;
+
+        [walletTransaction] = await this.walletTransactionModel.create(
+          [
+            {
+              wallet_id: adjustedWallet._id,
+              transaction_type: transactionType,
+              amount,
+              status: WalletTransactionStatus.Completed,
+              reference_id: `manual_adjustment:${randomUUID()}`,
+            },
+          ],
+          {
+            session: dbSession,
+          },
+        );
+
+        [auditTrail] = await this.auditTrailModel.create(
+          [
+            {
+              actor_id: adminObjectId,
+              action: AuditTrailAction.WalletManualAdjustment,
+              target_type: 'wallet',
+              target_id: adjustedWallet._id,
+              wallet_transaction_id: walletTransaction._id,
+              reason,
+              metadata: {
+                member_id: memberObjectId.toString(),
+                direction: data.direction,
+                amount,
+                balance_before: balanceBefore,
+                balance_after: balanceAfter,
+              },
+            },
+          ],
+          {
+            session: dbSession,
+          },
+        );
+      });
+
+      return {
+        message: 'Member wallet adjusted successfully',
+        wallet: {
+          id: adjustedWalletId,
+          memberId: member._id,
+          balance: balanceAfter,
+        },
+        transaction: {
+          id: walletTransaction?._id,
+          wallet_id: walletTransaction?.wallet_id,
+          transaction_type: walletTransaction?.transaction_type,
+          amount: walletTransaction?.amount,
+          status: walletTransaction?.status,
+          reference_id: walletTransaction?.reference_id,
+        },
+        auditTrail: {
+          id: auditTrail?._id,
+          action: auditTrail?.action,
+          reason: auditTrail?.reason,
+          wallet_transaction_id: auditTrail?.wallet_transaction_id,
+        },
+      };
+    } finally {
+      await dbSession.endSession();
+    }
+  }
+
   private getDateFilter(query: TransactionHistoryQueryDto): {
     $gte?: Date;
     $lte?: Date;
@@ -519,18 +889,98 @@ export class WalletsService {
     return new Types.ObjectId(value);
   }
 
-  private toWalletTransactionType(
-    type: TransactionHistoryType,
-  ): WalletTransactionType | undefined {
+  private toWalletTransactionType(type: TransactionHistoryType):
+    | WalletTransactionType
+    | {
+        $in: WalletTransactionType[];
+      }
+    | undefined {
     if (type === TransactionHistoryType.Deposit) {
-      return WalletTransactionType.Deposit;
+      return {
+        $in: [
+          WalletTransactionType.Deposit,
+          WalletTransactionType.ManualCredit,
+        ],
+      };
     }
 
     if (type === TransactionHistoryType.Withdrawal) {
-      return WalletTransactionType.Withdrawal;
+      return {
+        $in: [
+          WalletTransactionType.Withdrawal,
+          WalletTransactionType.ManualDebit,
+        ],
+      };
     }
 
     return undefined;
+  }
+
+  private toCmsWithdrawalRequestResponse(request: unknown) {
+    const withdrawal = request as {
+      _id: Types.ObjectId;
+      wallet_id?: {
+        _id: Types.ObjectId;
+        userId?:
+          | Types.ObjectId
+          | {
+              _id: Types.ObjectId;
+              fullName?: string;
+              email?: string;
+              nationalId?: string;
+              isActive?: boolean;
+            };
+        balance?: number;
+        lastDepositAt?: Date | null;
+        createdAt?: Date;
+        updatedAt?: Date;
+      };
+      amount?: number;
+      status?: WithdrawalRequestStatus;
+      createdAt?: Date;
+      updatedAt?: Date;
+    };
+
+    const wallet = withdrawal.wallet_id;
+    const member = (
+      wallet?.userId &&
+      typeof wallet.userId === 'object' &&
+      '_id' in wallet.userId
+        ? wallet.userId
+        : null
+    ) as {
+      _id: Types.ObjectId;
+      fullName?: string;
+      email?: string;
+      nationalId?: string;
+      isActive?: boolean;
+    } | null;
+
+    return {
+      id: withdrawal._id,
+      amount: withdrawal.amount,
+      status: withdrawal.status,
+      createdAt: withdrawal.createdAt,
+      updatedAt: withdrawal.updatedAt,
+      wallet: wallet
+        ? {
+            id: wallet._id,
+            balance: wallet.balance,
+            lastDepositAt: wallet.lastDepositAt,
+            createdAt: wallet.createdAt,
+            updatedAt: wallet.updatedAt,
+          }
+        : null,
+      member: member
+        ? {
+            id: member._id,
+            fullName: member.fullName,
+            email: member.email,
+            nationalId: member.nationalId,
+            isActive: member.isActive,
+          }
+        : null,
+    };
   }
 
   private isDuplicateKeyError(error: unknown): boolean {

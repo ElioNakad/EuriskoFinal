@@ -1,10 +1,11 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { getConnectionToken, getModelToken } from '@nestjs/mongoose';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Types } from 'mongoose';
 
 import { RedisService } from '../redis/redis.service';
 import { Stock } from '../stocks/schemas/stock.schema';
+import { User } from '../users/schemas/user.schema';
 import { Wallet } from '../wallets/schemas/wallet.schema';
 import { BuyOrder, BuyOrderStatus } from './schemas/buy-order.schema';
 import { SellOrder, SellOrderStatus } from './schemas/sell-order.schema';
@@ -19,6 +20,11 @@ describe('OrdersService', () => {
     };
   };
   let walletModel: {
+    collection: {
+      updateOne: jest.Mock;
+    };
+  };
+  let userModel: {
     collection: {
       updateOne: jest.Mock;
     };
@@ -63,6 +69,11 @@ describe('OrdersService', () => {
         updateOne: jest.fn(),
       },
     };
+    userModel = {
+      collection: {
+        updateOne: jest.fn(),
+      },
+    };
     buyOrderModel = {
       create: jest.fn(),
       findOne: jest.fn(),
@@ -98,6 +109,10 @@ describe('OrdersService', () => {
           useValue: walletModel,
         },
         {
+          provide: getModelToken(User.name),
+          useValue: userModel,
+        },
+        {
           provide: getModelToken(BuyOrder.name),
           useValue: buyOrderModel,
         },
@@ -131,6 +146,7 @@ describe('OrdersService', () => {
         }),
       }),
     });
+    userModel.collection.updateOne.mockResolvedValue({ matchedCount: 1 });
     stockModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
     walletModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
     buyOrderModel.create.mockResolvedValue([order]);
@@ -154,6 +170,18 @@ describe('OrdersService', () => {
       {
         $inc: {
           availableShares: -4,
+        },
+      },
+      { session },
+    );
+    expect(userModel.collection.updateOne).toHaveBeenCalledWith(
+      {
+        _id: new Types.ObjectId(userId),
+        isActive: true,
+      },
+      {
+        $currentDate: {
+          lastTradingActivityAt: true,
         },
       },
       { session },
@@ -204,6 +232,7 @@ describe('OrdersService', () => {
         }),
       }),
     });
+    userModel.collection.updateOne.mockResolvedValue({ matchedCount: 1 });
     stockModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
     walletModel.collection.updateOne.mockResolvedValue({ modifiedCount: 0 });
 
@@ -214,6 +243,27 @@ describe('OrdersService', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
 
+    expect(buyOrderModel.create).not.toHaveBeenCalled();
+    expect(redisService.delete).not.toHaveBeenCalled();
+    expect(session.endSession).toHaveBeenCalled();
+  });
+
+  it('rejects a market buy order when the member is inactive inside the transaction', async () => {
+    const userId = new Types.ObjectId().toHexString();
+    const stockId = new Types.ObjectId().toHexString();
+
+    userModel.collection.updateOne.mockResolvedValue({ matchedCount: 0 });
+
+    await expect(
+      service.placeMarketBuyOrder(userId, {
+        stockId,
+        numberOfShares: 4,
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(stockModel.findOne).not.toHaveBeenCalled();
+    expect(stockModel.collection.updateOne).not.toHaveBeenCalled();
+    expect(walletModel.collection.updateOne).not.toHaveBeenCalled();
     expect(buyOrderModel.create).not.toHaveBeenCalled();
     expect(redisService.delete).not.toHaveBeenCalled();
     expect(session.endSession).toHaveBeenCalled();
@@ -250,6 +300,7 @@ describe('OrdersService', () => {
         }),
       }),
     });
+    userModel.collection.updateOne.mockResolvedValue({ matchedCount: 1 });
     stockModel.findOne.mockReturnValue({
       session: jest.fn().mockReturnValue({
         lean: jest.fn().mockResolvedValue({
@@ -287,6 +338,18 @@ describe('OrdersService', () => {
         $set: expect.objectContaining({
           availableShares: 0,
         }),
+      },
+      { session },
+    );
+    expect(userModel.collection.updateOne).toHaveBeenCalledWith(
+      {
+        _id: new Types.ObjectId(userId),
+        isActive: true,
+      },
+      {
+        $currentDate: {
+          lastTradingActivityAt: true,
+        },
       },
       { session },
     );

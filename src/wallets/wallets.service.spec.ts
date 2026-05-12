@@ -5,11 +5,15 @@ import { BadRequestException } from '@nestjs/common';
 import { Types } from 'mongoose';
 
 import { MailService } from '../mail/mail.service';
+import { AuditTrail } from '../cms/schemas/audit-trail.schema';
 import { BuyOrder } from '../orders/schemas/buy-order.schema';
 import { SellOrder } from '../orders/schemas/sell-order.schema';
 import { UsersService } from '../users/users.service';
 import { TransactionHistoryType } from './dto/transaction-history-query.dto';
-import { WalletTransaction } from './schemas/wallet-transaction.schema';
+import {
+  WalletTransaction,
+  WalletTransactionType,
+} from './schemas/wallet-transaction.schema';
 import { Wallet } from './schemas/wallet.schema';
 import {
   WithdrawalRequest,
@@ -32,6 +36,9 @@ describe('WalletsService', () => {
     exists: jest.Mock;
     create: jest.Mock;
     find: jest.Mock;
+  };
+  let auditTrailModel: {
+    create: jest.Mock;
   };
   let buyOrderModel: {
     find: jest.Mock;
@@ -64,6 +71,9 @@ describe('WalletsService', () => {
       exists: jest.fn(),
       create: jest.fn(),
       find: jest.fn(),
+    };
+    auditTrailModel = {
+      create: jest.fn(),
     };
     buyOrderModel = {
       find: jest.fn(),
@@ -110,6 +120,10 @@ describe('WalletsService', () => {
         {
           provide: getModelToken(WalletTransaction.name),
           useValue: walletTransactionModel,
+        },
+        {
+          provide: getModelToken(AuditTrail.name),
+          useValue: auditTrailModel,
         },
         {
           provide: getModelToken(BuyOrder.name),
@@ -257,12 +271,20 @@ describe('WalletsService', () => {
 
     expect(walletTransactionModel.find).toHaveBeenCalledWith({
       wallet_id: walletId,
-      transaction_type: 'withdrawal',
+      transaction_type: {
+        $in: [
+          WalletTransactionType.Withdrawal,
+          WalletTransactionType.ManualDebit,
+        ],
+      },
     });
     expect(withdrawalRequestModel.find).toHaveBeenCalledWith({
       wallet_id: walletId,
       status: {
-        $in: [WithdrawalRequestStatus.Pending, WithdrawalRequestStatus.Rejected],
+        $in: [
+          WithdrawalRequestStatus.Pending,
+          WithdrawalRequestStatus.Rejected,
+        ],
       },
     });
     expect(buyOrderModel.find).not.toHaveBeenCalled();

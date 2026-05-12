@@ -46,6 +46,42 @@ export class UsersService {
     return this.userModel.findById(userId);
   }
 
+  async getMemberRegistrationMetrics() {
+    const now = new Date();
+    const startOfCurrentMonth = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+    );
+
+    const [totalRegisteredMembers, previousTotalRegisteredMembers] =
+      await Promise.all([
+        this.userModel.countDocuments({ role: 'member' }),
+        this.userModel.countDocuments({
+          role: 'member',
+          createdAt: { $lt: startOfCurrentMonth },
+        }),
+      ]);
+
+    const currentMonthRegisteredMembers =
+      totalRegisteredMembers - previousTotalRegisteredMembers;
+    const monthOverMonthGrowthRate =
+      previousTotalRegisteredMembers === 0
+        ? totalRegisteredMembers === 0
+          ? 0
+          : null
+        : (currentMonthRegisteredMembers / previousTotalRegisteredMembers) *
+          100;
+
+    return {
+      totalRegisteredMembers,
+      monthOverMonthGrowthRate,
+      currentMonthRegisteredMembers,
+      previousTotalRegisteredMembers,
+      periodStart: startOfCurrentMonth,
+    };
+  }
+
   async suspendMemberAccount(
     memberId: string,
     reason: string,
