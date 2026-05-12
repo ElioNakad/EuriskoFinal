@@ -65,3 +65,5 @@ export class SellOrder {
 }
 
 export const SellOrderSchema = SchemaFactory.createForClass(SellOrder);
+
+SellOrderSchema.index({ user_id: 1, soldAt: -1 });

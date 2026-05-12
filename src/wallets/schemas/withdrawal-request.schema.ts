@@ -55,3 +55,6 @@ WithdrawalRequestSchema.index(
     },
   },
 );
+
+WithdrawalRequestSchema.index({ status: 1, createdAt: -1 });
+WithdrawalRequestSchema.index({ wallet_id: 1, status: 1, createdAt: -1 });

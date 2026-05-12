@@ -83,10 +83,19 @@ describe('StocksService', () => {
     const stocks = [{ companyName: 'Apple' }];
 
     stockModel.find.mockReturnValue({
+      sort: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockReturnThis(),
       exec: jest.fn().mockResolvedValue(stocks),
     });
 
-    await expect(service.findAll()).resolves.toBe(stocks);
+    await expect(service.findAll()).resolves.toEqual({
+      data: stocks,
+      page: 1,
+      limit: 20,
+      hasMore: false,
+    });
   });
 
   it('should find a stock by name', async () => {
@@ -106,15 +115,22 @@ describe('StocksService', () => {
       exec: jest.fn().mockResolvedValue(stock),
     });
     stockHistoryModel.find.mockReturnValue({
-      sort: jest.fn().mockReturnValue({
-        exec: jest.fn().mockResolvedValue(stockHistory),
-      }),
+      sort: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
+      lean: jest.fn().mockReturnThis(),
+      exec: jest.fn().mockResolvedValue(stockHistory),
     });
 
     await expect(service.findByName('Apple')).resolves.toEqual({
       _id: 'stock-id',
       companyName: 'Apple',
-      stockHistory,
+      stockHistory: {
+        data: stockHistory,
+        page: 1,
+        limit: 20,
+        hasMore: false,
+      },
     });
     expect(stockModel.findOne).toHaveBeenCalledWith({
       ticker: /^Apple$/i,

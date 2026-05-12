@@ -52,6 +52,14 @@ describe('WalletsService', () => {
     endSession: jest.Mock;
   };
 
+  const mockFindChain = (result: unknown[]) => ({
+    populate: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue(result),
+  });
+
   beforeEach(async () => {
     dbSession = {
       withTransaction: jest.fn(async (callback: () => Promise<void>) =>
@@ -221,6 +229,8 @@ describe('WalletsService', () => {
       _id: walletId,
     });
     walletTransactionModel.find.mockReturnValue({
+      sort: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
       lean: jest.fn().mockResolvedValue([
         {
           _id: walletWithdrawalId,
@@ -233,6 +243,8 @@ describe('WalletsService', () => {
       ]),
     });
     withdrawalRequestModel.find = jest.fn().mockReturnValue({
+      sort: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockReturnThis(),
       lean: jest.fn().mockResolvedValue([
         {
           _id: pendingWithdrawalId,
@@ -253,23 +265,28 @@ describe('WalletsService', () => {
       service.getTransactionHistory(new Types.ObjectId().toHexString(), {
         type: TransactionHistoryType.Withdrawal,
       }),
-    ).resolves.toEqual([
-      expect.objectContaining({
-        id: pendingWithdrawalId.toString(),
-        source: 'withdrawals_requests',
-        status: WithdrawalRequestStatus.Pending,
-      }),
-      expect.objectContaining({
-        id: walletWithdrawalId.toString(),
-        source: 'wallet_transactions',
-        status: 'completed',
-      }),
-      expect.objectContaining({
-        id: rejectedWithdrawalId.toString(),
-        source: 'withdrawals_requests',
-        status: WithdrawalRequestStatus.Rejected,
-      }),
-    ]);
+    ).resolves.toEqual({
+      data: [
+        expect.objectContaining({
+          id: pendingWithdrawalId.toString(),
+          source: 'withdrawals_requests',
+          status: WithdrawalRequestStatus.Pending,
+        }),
+        expect.objectContaining({
+          id: walletWithdrawalId.toString(),
+          source: 'wallet_transactions',
+          status: 'completed',
+        }),
+        expect.objectContaining({
+          id: rejectedWithdrawalId.toString(),
+          source: 'withdrawals_requests',
+          status: WithdrawalRequestStatus.Rejected,
+        }),
+      ],
+      page: 1,
+      limit: 20,
+      hasMore: false,
+    });
 
     expect(walletTransactionModel.find).toHaveBeenCalledWith({
       wallet_id: walletId,
@@ -300,10 +317,8 @@ describe('WalletsService', () => {
     const createdAt = new Date('2026-01-04T00:00:00.000Z');
 
     withdrawalRequestModel.countDocuments.mockResolvedValue(1);
-    withdrawalRequestModel.find.mockReturnValue({
-      populate: jest.fn().mockReturnThis(),
-      sort: jest.fn().mockReturnThis(),
-      lean: jest.fn().mockResolvedValue([
+    withdrawalRequestModel.find.mockReturnValue(
+      mockFindChain([
         {
           _id: requestId,
           wallet_id: {
@@ -324,10 +339,12 @@ describe('WalletsService', () => {
           updatedAt: createdAt,
         },
       ]),
-    });
+    );
 
     await expect(service.getPendingWithdrawalRequestsForCms()).resolves.toEqual({
       total: 1,
+      page: 1,
+      limit: 20,
       withdrawalRequests: [
         {
           id: requestId,

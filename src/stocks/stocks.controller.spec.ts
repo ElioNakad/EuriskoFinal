@@ -72,7 +72,7 @@ describe('StocksController', () => {
   it('should find a stock by name', () => {
     controller.findByName('Apple');
 
-    expect(service.findByName).toHaveBeenCalledWith('Apple');
+    expect(service.findByName).toHaveBeenCalledWith('Apple', undefined);
   });
 
   it('should update a stock by ticker', () => {

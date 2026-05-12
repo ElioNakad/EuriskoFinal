@@ -5,11 +5,13 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { Request } from 'express';
 
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { UsersService } from '../users/users.service';
 import { WalletsService } from '../wallets/wallets.service';
@@ -90,14 +92,14 @@ export class CmsController {
 
   @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
   @Get('withdrawal-requests')
-  getWithdrawalRequests() {
-    return this.walletsService.getWithdrawalRequestsForCms();
+  getWithdrawalRequests(@Query() query: PaginationQueryDto) {
+    return this.walletsService.getWithdrawalRequestsForCms(query);
   }
 
   @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
   @Get('withdrawal-requests/pending-review')
-  getPendingWithdrawalRequests() {
-    return this.walletsService.getPendingWithdrawalRequestsForCms();
+  getPendingWithdrawalRequests(@Query() query: PaginationQueryDto) {
+    return this.walletsService.getPendingWithdrawalRequestsForCms(query);
   }
 
   @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
