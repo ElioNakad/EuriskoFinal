@@ -1,12 +1,16 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CmsAnalystGuard } from '../cms/guards/cms-analyst.guard';
 import { StocksController } from './stocks.controller';
 import { StocksService } from './stocks.service';
 
 describe('StocksController', () => {
   let controller: StocksController;
   let service: jest.Mocked<
-    Pick<StocksService, 'create' | 'findAll' | 'findByName' | 'updateByTicker'>
+    Pick<
+      StocksService,
+      'create' | 'findAll' | 'findByName' | 'updateByTicker' | 'delist'
+    >
   >;
 
   beforeEach(async () => {
@@ -15,6 +19,7 @@ describe('StocksController', () => {
       findAll: jest.fn(),
       findByName: jest.fn(),
       updateByTicker: jest.fn(),
+      delist: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -27,6 +32,10 @@ describe('StocksController', () => {
       ],
     })
       .overrideGuard(JwtAuthGuard)
+      .useValue({
+        canActivate: jest.fn(() => true),
+      })
+      .overrideGuard(CmsAnalystGuard)
       .useValue({
         canActivate: jest.fn(() => true),
       })
@@ -72,5 +81,11 @@ describe('StocksController', () => {
     controller.updateByTicker('AAPL', update);
 
     expect(service.updateByTicker).toHaveBeenCalledWith('AAPL', update);
+  });
+
+  it('should delist a stock by ticker', () => {
+    controller.delist('AAPL');
+
+    expect(service.delist).toHaveBeenCalledWith('AAPL');
   });
 });

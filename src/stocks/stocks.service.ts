@@ -104,6 +104,10 @@ export class StocksService {
     return stock;
   }
 
+  async delist(ticker: string) {
+    return this.updateByTicker(ticker, { isListed: false });
+  }
+
   private escapeRegExp(value: string) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
