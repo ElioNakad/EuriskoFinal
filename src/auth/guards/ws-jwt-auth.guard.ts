@@ -1,6 +1,7 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 
+import { UsersService } from '../../users/users.service';
 import { AuthenticatedSocket } from '../types/authenticated-socket.type';
 
 interface JwtPayload {
@@ -12,7 +13,10 @@ interface JwtPayload {
 
 @Injectable()
 export class WsJwtAuthGuard implements CanActivate {
-  constructor(private readonly jwtService: JwtService) {}
+  constructor(
+    private readonly jwtService: JwtService,
+    private readonly usersService: UsersService,
+  ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const client = context.switchToWs().getClient<AuthenticatedSocket>();
@@ -36,6 +40,14 @@ export class WsJwtAuthGuard implements CanActivate {
       const payload = await this.jwtService.verifyAsync<JwtPayload>(token, {
         secret: process.env.JWT_SECRET,
       });
+
+      if (payload.accountType === 'member') {
+        const user = await this.usersService.findById(payload.sub);
+
+        if (!user?.isActive) {
+          return false;
+        }
+      }
 
       client.user = {
         userId: payload.sub,

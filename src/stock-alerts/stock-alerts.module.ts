@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { MongooseModule } from '@nestjs/mongoose';
 
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MailModule } from '../mail/mail.module';
 import { RabbitMqModule } from '../rabbitmq/rabbitmq.module';
 import { UsersModule } from '../users/users.module';
@@ -28,6 +29,6 @@ import { StockAlert, StockAlertSchema } from './schemas/stock-alert.schema';
     ]),
   ],
   controllers: [StockAlertsController],
-  providers: [StockAlertsService],
+  providers: [StockAlertsService, JwtAuthGuard],
 })
 export class StockAlertsModule {}
