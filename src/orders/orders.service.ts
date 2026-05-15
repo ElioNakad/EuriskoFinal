@@ -219,13 +219,12 @@ export class OrdersService {
         const stock = await this.stockModel
           .findOne({
             _id: buyOrder.stock_id,
-            isListed: true,
           })
           .session(session)
           .lean<LeanStock>();
 
         if (!stock) {
-          throw new NotFoundException('Stock not found or not listed');
+          throw new NotFoundException('Stock not found');
         }
 
         const closedAt = new Date();
@@ -264,7 +263,6 @@ export class OrdersService {
         await this.stockModel.collection.updateOne(
           {
             _id: buyOrder.stock_id,
-            isListed: true,
           },
           {
             $inc: {

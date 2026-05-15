@@ -356,7 +356,6 @@ describe('OrdersService', () => {
     expect(stockModel.collection.updateOne).toHaveBeenCalledWith(
       {
         _id: stockId,
-        isListed: true,
       },
       {
         $inc: {
@@ -400,6 +399,81 @@ describe('OrdersService', () => {
       `portfolio-summary:${userId}`,
     );
     expect(session.endSession).toHaveBeenCalled();
+  });
+
+  it('allows closing an existing position when the stock is delisted', async () => {
+    const userId = new Types.ObjectId().toHexString();
+    const orderId = new Types.ObjectId().toHexString();
+    const stockId = new Types.ObjectId();
+    const sellOrder = { _id: new Types.ObjectId() };
+    const summary = {
+      userId,
+      positions: [],
+      totals: {
+        shares: 0,
+        cost: 0,
+        marketValue: 0,
+        unrealizedGainLoss: 0,
+      },
+      cachedAt: new Date().toISOString(),
+    };
+
+    buyOrderModel.findOne.mockReturnValue({
+      session: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          _id: new Types.ObjectId(orderId),
+          stock_id: stockId,
+          user_id: new Types.ObjectId(userId),
+          numberOfShares: 4,
+          availableShares: 4,
+          costPerShare: 25,
+          totalCost: 100,
+          status: BuyOrderStatus.Filled,
+        }),
+      }),
+    });
+    userModel.collection.updateOne.mockResolvedValue({ matchedCount: 1 });
+    stockModel.findOne.mockReturnValue({
+      session: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          _id: stockId,
+          currentPrice: 30,
+          isListed: false,
+        }),
+      }),
+    });
+    buyOrderModel.collection.updateOne.mockResolvedValue({
+      modifiedCount: 1,
+    });
+    stockModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    walletModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
+    sellOrderModel.create.mockResolvedValue([sellOrder]);
+    redisService.get.mockResolvedValue(summary);
+
+    await expect(
+      service.closeMarketSellOrder(userId, {
+        orderId,
+      }),
+    ).resolves.toEqual({
+      message: 'Sell order closed',
+      sellOrder,
+      portfolioSummary: summary,
+    });
+
+    expect(stockModel.findOne).toHaveBeenCalledWith({
+      _id: stockId,
+    });
+    expect(stockModel.collection.updateOne).toHaveBeenCalledWith(
+      {
+        _id: stockId,
+      },
+      {
+        $inc: {
+          availableShares: 4,
+        },
+      },
+      { session },
+    );
   });
 
   it('returns cached portfolio summaries by member id', async () => {
