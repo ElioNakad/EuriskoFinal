@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 
@@ -11,11 +11,14 @@ import { RabbitMqModule } from './rabbitmq/rabbitmq.module';
 import { StockAlertsModule } from './stock-alerts/stock-alerts.module';
 import { CmsModule } from './cms/cms.module';
 import { AnalystModule } from './analyst/analyst.module';
+import { RequestIdMiddleware } from './common/middleware/request-id.middleware';
+import { validateEnv } from './config/env.validation';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      validate: validateEnv,
     }),
     MongooseModule.forRoot(process.env.MONGO_URI!),
 
@@ -30,4 +33,8 @@ import { AnalystModule } from './analyst/analyst.module';
     AnalystModule,
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}
