@@ -2,10 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, PipelineStage, Types } from 'mongoose';
 
-import {
-  BuyOrder,
-  BuyOrderDocument,
-} from '../orders/schemas/buy-order.schema';
+import { BuyOrder, BuyOrderDocument } from '../orders/schemas/buy-order.schema';
 import {
   SellOrder,
   SellOrderDocument,
