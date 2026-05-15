@@ -21,6 +21,7 @@ import { ManualWalletAdjustmentDto } from './dto/manual-wallet-adjustment.dto';
 import { MemberAccountStatusDto } from './dto/member-account-status.dto';
 import { UpdateWithdrawalRequestStatusDto } from './dto/update-withdrawal-request-status.dto';
 import { CmsSuperAdminGuard } from './guards/cms-super-admin.guard';
+import { CmsWithdrawalReviewGuard } from './guards/cms-withdrawal-review.guard';
 
 type CmsRequest = Request & {
   user: {
@@ -102,7 +103,7 @@ export class CmsController {
     return this.walletsService.getPendingWithdrawalRequestsForCms(query);
   }
 
-  @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
+  @UseGuards(JwtAuthGuard, CmsWithdrawalReviewGuard)
   @Patch('withdrawal-requests/:requestId/status')
   updateWithdrawalRequestStatus(
     @Param('requestId') requestId: string,
