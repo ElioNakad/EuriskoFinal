@@ -1,5 +1,5 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
-import { CmsWithdrawalReviewGuard } from './cms-withdrawal-review.guard';
+import { CmsAdminGuard } from './cms-admin.guard';
 
 const createContext = (user?: { accountType?: string; role?: string }) =>
   ({
@@ -8,17 +8,17 @@ const createContext = (user?: { accountType?: string; role?: string }) =>
     }),
   }) as ExecutionContext;
 
-describe('CmsWithdrawalReviewGuard', () => {
-  let guard: CmsWithdrawalReviewGuard;
+describe('CmsAdminGuard', () => {
+  let guard: CmsAdminGuard;
 
   beforeEach(() => {
-    guard = new CmsWithdrawalReviewGuard();
+    guard = new CmsAdminGuard();
   });
 
-  it('allows cms support agents', () => {
+  it('allows cms administrators', () => {
     expect(
       guard.canActivate(
-        createContext({ accountType: 'cms', role: 'support-agent' }),
+        createContext({ accountType: 'cms', role: 'administrator' }),
       ),
     ).toBe(true);
   });
@@ -31,15 +31,7 @@ describe('CmsWithdrawalReviewGuard', () => {
     ).toBe(true);
   });
 
-  it('allows cms administrators', () => {
-    expect(
-      guard.canActivate(
-        createContext({ accountType: 'cms', role: 'administrator' }),
-      ),
-    ).toBe(true);
-  });
-
-  it('rejects other cms roles', () => {
+  it('rejects specialized cms roles', () => {
     expect(() =>
       guard.canActivate(createContext({ accountType: 'cms', role: 'analyst' })),
     ).toThrow(ForbiddenException);
@@ -48,7 +40,7 @@ describe('CmsWithdrawalReviewGuard', () => {
   it('rejects non-cms accounts', () => {
     expect(() =>
       guard.canActivate(
-        createContext({ accountType: 'member', role: 'support-agent' }),
+        createContext({ accountType: 'member', role: 'administrator' }),
       ),
     ).toThrow(ForbiddenException);
   });

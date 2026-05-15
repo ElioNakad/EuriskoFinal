@@ -8,6 +8,9 @@ import { WalletsModule } from '../wallets/wallets.module';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CmsController } from './cms.controller';
 import { CmsService } from './cms.service';
+import { CmsAdminGuard } from './guards/cms-admin.guard';
+import { CmsSuperAdminGuard } from './guards/cms-super-admin.guard';
+import { CmsWithdrawalReviewGuard } from './guards/cms-withdrawal-review.guard';
 import { CmsAccount, CmsAccountSchema } from './schemas/cms-account.schema';
 
 @Module({
@@ -29,7 +32,13 @@ import { CmsAccount, CmsAccountSchema } from './schemas/cms-account.schema';
     WalletsModule,
   ],
   controllers: [CmsController],
-  providers: [CmsService, JwtAuthGuard],
+  providers: [
+    CmsService,
+    JwtAuthGuard,
+    CmsAdminGuard,
+    CmsSuperAdminGuard,
+    CmsWithdrawalReviewGuard,
+  ],
   exports: [CmsService],
 })
 export class CmsModule {}

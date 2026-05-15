@@ -1,5 +1,5 @@
 import { ExecutionContext, ForbiddenException } from '@nestjs/common';
-import { CmsAnalystGuard } from './cms-analyst.guard';
+import { CmsSuperAdminGuard } from './cms-super-admin.guard';
 
 const createContext = (user?: { accountType?: string; role?: string }) =>
   ({
@@ -8,17 +8,11 @@ const createContext = (user?: { accountType?: string; role?: string }) =>
     }),
   }) as ExecutionContext;
 
-describe('CmsAnalystGuard', () => {
-  let guard: CmsAnalystGuard;
+describe('CmsSuperAdminGuard', () => {
+  let guard: CmsSuperAdminGuard;
 
   beforeEach(() => {
-    guard = new CmsAnalystGuard();
-  });
-
-  it('allows cms analysts', () => {
-    expect(
-      guard.canActivate(createContext({ accountType: 'cms', role: 'analyst' })),
-    ).toBe(true);
+    guard = new CmsSuperAdminGuard();
   });
 
   it('allows cms super administrators', () => {
@@ -29,24 +23,18 @@ describe('CmsAnalystGuard', () => {
     ).toBe(true);
   });
 
-  it('allows cms administrators', () => {
-    expect(
+  it('rejects cms administrators', () => {
+    expect(() =>
       guard.canActivate(
         createContext({ accountType: 'cms', role: 'administrator' }),
       ),
-    ).toBe(true);
-  });
-
-  it('rejects other cms roles', () => {
-    expect(() =>
-      guard.canActivate(createContext({ accountType: 'cms', role: 'trader' })),
     ).toThrow(ForbiddenException);
   });
 
   it('rejects non-cms accounts', () => {
     expect(() =>
       guard.canActivate(
-        createContext({ accountType: 'member', role: 'analyst' }),
+        createContext({ accountType: 'member', role: 'super-admin' }),
       ),
     ).toThrow(ForbiddenException);
   });
