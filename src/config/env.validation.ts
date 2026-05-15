@@ -5,12 +5,18 @@ const DEFAULT_REDIS_HOST = 'localhost';
 const DEFAULT_REDIS_PORT = 6379;
 const DEFAULT_RABBITMQ_URL = 'amqp://localhost:5672';
 const DEFAULT_RABBITMQ_PREFETCH = 20;
+const DEFAULT_STOCK_CATALOGUE_CACHE_TTL = 300;
+const DEFAULT_STOCK_PRICE_CACHE_TTL = 60;
+const DEFAULT_PORTFOLIO_SUMMARY_CACHE_TTL = 60;
 
 interface EnvConfig {
   PORT: number;
   MONGO_URI: string;
   REDIS_HOST: string;
   REDIS_PORT: number;
+  STOCK_CATALOGUE_CACHE_TTL_SECONDS: number;
+  STOCK_PRICE_CACHE_TTL_SECONDS: number;
+  PORTFOLIO_SUMMARY_CACHE_TTL_SECONDS: number;
   JWT_SECRET: string;
   EMAIL?: string;
   EMAIL_PASS?: string;
@@ -63,6 +69,21 @@ export function validateEnv(config: Record<string, EnvValue>): EnvConfig {
     MONGO_URI: requireString(config, 'MONGO_URI'),
     REDIS_HOST: config.REDIS_HOST || DEFAULT_REDIS_HOST,
     REDIS_PORT: parseNumber(config, 'REDIS_PORT', DEFAULT_REDIS_PORT),
+    STOCK_CATALOGUE_CACHE_TTL_SECONDS: parseNumber(
+      config,
+      'STOCK_CATALOGUE_CACHE_TTL_SECONDS',
+      DEFAULT_STOCK_CATALOGUE_CACHE_TTL,
+    ),
+    STOCK_PRICE_CACHE_TTL_SECONDS: parseNumber(
+      config,
+      'STOCK_PRICE_CACHE_TTL_SECONDS',
+      DEFAULT_STOCK_PRICE_CACHE_TTL,
+    ),
+    PORTFOLIO_SUMMARY_CACHE_TTL_SECONDS: parseNumber(
+      config,
+      'PORTFOLIO_SUMMARY_CACHE_TTL_SECONDS',
+      DEFAULT_PORTFOLIO_SUMMARY_CACHE_TTL,
+    ),
     JWT_SECRET: requireString(config, 'JWT_SECRET'),
     EMAIL: config.EMAIL,
     EMAIL_PASS: config.EMAIL_PASS,
