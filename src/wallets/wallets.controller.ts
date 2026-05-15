@@ -5,6 +5,7 @@ import { Request } from 'express';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 import { WalletsService } from './wallets.service';
+import { CreateDepositSessionDto } from './dto/create-deposit-session.dto';
 import { RequestWithdrawalDto } from './dto/request-withdrawal.dto';
 import { TransactionHistoryQueryDto } from './dto/transaction-history-query.dto';
 
@@ -17,9 +18,12 @@ export class WalletsController {
   createDepositSession(
     @common.Req() req: Request & { user: { userId: string } },
 
-    @common.Body('amount') amount: number,
+    @common.Body() createDepositSessionDto: CreateDepositSessionDto,
   ) {
-    return this.walletService.createDepositSession(req.user.userId, amount);
+    return this.walletService.createDepositSession(
+      req.user.userId,
+      createDepositSessionDto.amount,
+    );
   }
 
   @common.UseGuards(JwtAuthGuard)
