@@ -17,7 +17,7 @@ type CmsRequest = Request & {
 export class CmsWithdrawalReviewGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<CmsRequest>();
-    const allowedRoles = ['support-agent', 'super-admin'];
+    const allowedRoles = ['administrator', 'support-agent', 'super-admin'];
 
     if (
       request.user?.accountType !== 'cms' ||

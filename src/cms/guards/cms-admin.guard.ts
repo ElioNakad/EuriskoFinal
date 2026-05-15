@@ -14,16 +14,16 @@ type CmsRequest = Request & {
 };
 
 @Injectable()
-export class CmsAnalystGuard implements CanActivate {
+export class CmsAdminGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<CmsRequest>();
-    const allowedRoles = ['administrator', 'analyst', 'super-admin'];
+    const allowedRoles = ['administrator', 'super-admin'];
 
     if (
       request.user?.accountType !== 'cms' ||
       !allowedRoles.includes(request.user.role ?? '')
     ) {
-      throw new ForbiddenException('Analyst access required');
+      throw new ForbiddenException('CMS administrator access required');
     }
 
     return true;

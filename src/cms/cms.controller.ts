@@ -20,6 +20,7 @@ import { CreateCmsAccountDto } from './dto/create-cms-account.dto';
 import { ManualWalletAdjustmentDto } from './dto/manual-wallet-adjustment.dto';
 import { MemberAccountStatusDto } from './dto/member-account-status.dto';
 import { UpdateWithdrawalRequestStatusDto } from './dto/update-withdrawal-request-status.dto';
+import { CmsAdminGuard } from './guards/cms-admin.guard';
 import { CmsSuperAdminGuard } from './guards/cms-super-admin.guard';
 import { CmsWithdrawalReviewGuard } from './guards/cms-withdrawal-review.guard';
 
@@ -43,13 +44,13 @@ export class CmsController {
     return this.cmsService.createCmsUser(dto);
   }
 
-  @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
+  @UseGuards(JwtAuthGuard, CmsAdminGuard)
   @Get('members/metrics')
   getMemberRegistrationMetrics() {
     return this.usersService.getMemberRegistrationMetrics();
   }
 
-  @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
+  @UseGuards(JwtAuthGuard, CmsAdminGuard)
   @Post('members/:memberId/suspend')
   suspendMemberAccount(
     @Param('memberId') memberId: string,
@@ -63,7 +64,7 @@ export class CmsController {
     );
   }
 
-  @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
+  @UseGuards(JwtAuthGuard, CmsAdminGuard)
   @Post('members/:memberId/reinstate')
   reinstateMemberAccount(
     @Param('memberId') memberId: string,
@@ -77,7 +78,7 @@ export class CmsController {
     );
   }
 
-  @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
+  @UseGuards(JwtAuthGuard, CmsAdminGuard)
   @Post('members/:memberId/wallet/adjust')
   adjustMemberWallet(
     @Param('memberId') memberId: string,
@@ -91,13 +92,13 @@ export class CmsController {
     );
   }
 
-  @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
+  @UseGuards(JwtAuthGuard, CmsAdminGuard)
   @Get('withdrawal-requests')
   getWithdrawalRequests(@Query() query: PaginationQueryDto) {
     return this.walletsService.getWithdrawalRequestsForCms(query);
   }
 
-  @UseGuards(JwtAuthGuard, CmsSuperAdminGuard)
+  @UseGuards(JwtAuthGuard, CmsAdminGuard)
   @Get('withdrawal-requests/pending-review')
   getPendingWithdrawalRequests(@Query() query: PaginationQueryDto) {
     return this.walletsService.getPendingWithdrawalRequestsForCms(query);
