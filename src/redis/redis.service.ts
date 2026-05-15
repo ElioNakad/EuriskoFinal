@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
 
 type JsonValue =
@@ -10,7 +10,7 @@ type JsonValue =
   | JsonValue[];
 
 @Injectable()
-export class RedisService {
+export class RedisService implements OnModuleDestroy {
   private readonly redis: Redis;
 
   constructor() {
@@ -36,5 +36,21 @@ export class RedisService {
 
   async delete(key: string): Promise<void> {
     await this.redis.del(key);
+  }
+
+  async deleteByPattern(pattern: string): Promise<void> {
+    const stream = this.redis.scanStream({ match: pattern });
+
+    for await (const keys of stream) {
+      const keyBatch = keys as string[];
+
+      if (keyBatch.length > 0) {
+        await this.redis.del(...keyBatch);
+      }
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.redis.quit();
   }
 }

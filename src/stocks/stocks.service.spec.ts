@@ -4,11 +4,18 @@ import { StocksService } from './stocks.service';
 import { StockHistory } from './schemas/stock-history.schema';
 import { Stock } from './schemas/stock.schema';
 import { RabbitMqService } from '../rabbitmq/rabbitmq.service';
+import { RedisService } from '../redis/redis.service';
 
 describe('StocksService', () => {
   let service: StocksService;
   let rabbitMqService: {
     publish: jest.Mock;
+  };
+  let redisService: {
+    get: jest.Mock;
+    set: jest.Mock;
+    delete: jest.Mock;
+    deleteByPattern: jest.Mock;
   };
   let stockModel: {
     create: jest.Mock;
@@ -33,6 +40,12 @@ describe('StocksService', () => {
     rabbitMqService = {
       publish: jest.fn().mockResolvedValue(true),
     };
+    redisService = {
+      get: jest.fn(),
+      set: jest.fn(),
+      delete: jest.fn(),
+      deleteByPattern: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -48,6 +61,10 @@ describe('StocksService', () => {
         {
           provide: RabbitMqService,
           useValue: rabbitMqService,
+        },
+        {
+          provide: RedisService,
+          useValue: redisService,
         },
       ],
     }).compile();
@@ -77,11 +94,23 @@ describe('StocksService', () => {
       ...createStockDto,
       initialShares: createStockDto.availableShares,
     });
+    expect(redisService.deleteByPattern).toHaveBeenCalledWith(
+      'stocks:catalogue:*',
+    );
+    expect(redisService.set).toHaveBeenCalledWith(
+      'stocks:price:MSFT',
+      {
+        ticker: 'MSFT',
+        currentPrice: 420,
+      },
+      60,
+    );
   });
 
   it('should find all stocks', async () => {
     const stocks = [{ companyName: 'Apple' }];
 
+    redisService.get.mockResolvedValue(null);
     stockModel.find.mockReturnValue({
       sort: jest.fn().mockReturnThis(),
       skip: jest.fn().mockReturnThis(),
@@ -96,15 +125,46 @@ describe('StocksService', () => {
       limit: 20,
       hasMore: false,
     });
+    expect(redisService.get).toHaveBeenCalledWith(
+      'stocks:catalogue:page:1:limit:20',
+    );
+    expect(redisService.set).toHaveBeenCalledWith(
+      'stocks:catalogue:page:1:limit:20',
+      {
+        data: stocks,
+        page: 1,
+        limit: 20,
+        hasMore: false,
+      },
+      300,
+    );
+  });
+
+  it('should return cached stock catalogue listings', async () => {
+    const cachedCatalogue = {
+      data: [{ companyName: 'Cached Apple' }],
+      page: 1,
+      limit: 20,
+      hasMore: false,
+    };
+
+    redisService.get.mockResolvedValue(cachedCatalogue);
+
+    await expect(service.findAll()).resolves.toEqual(cachedCatalogue);
+    expect(stockModel.find).not.toHaveBeenCalled();
   });
 
   it('should find a stock by name', async () => {
     const stock = {
       _id: 'stock-id',
+      ticker: 'AAPL',
       companyName: 'Apple',
+      currentPrice: 210,
       toObject: jest.fn().mockReturnValue({
         _id: 'stock-id',
+        ticker: 'AAPL',
         companyName: 'Apple',
+        currentPrice: 210,
       }),
     };
     const stockHistory = [
@@ -124,7 +184,9 @@ describe('StocksService', () => {
 
     await expect(service.findByName('Apple')).resolves.toEqual({
       _id: 'stock-id',
+      ticker: 'AAPL',
       companyName: 'Apple',
+      currentPrice: 210,
       stockHistory: {
         data: stockHistory,
         page: 1,
@@ -132,6 +194,14 @@ describe('StocksService', () => {
         hasMore: false,
       },
     });
+    expect(redisService.set).toHaveBeenCalledWith(
+      'stocks:price:AAPL',
+      {
+        ticker: 'AAPL',
+        currentPrice: 210,
+      },
+      60,
+    );
     expect(stockModel.findOne).toHaveBeenCalledWith({
       ticker: /^Apple$/i,
     });
@@ -175,6 +245,18 @@ describe('StocksService', () => {
         runValidators: true,
       },
     );
+    expect(redisService.deleteByPattern).toHaveBeenCalledWith(
+      'stocks:catalogue:*',
+    );
+    expect(redisService.delete).toHaveBeenCalledWith('stocks:price:AAPL');
+    expect(redisService.set).toHaveBeenCalledWith(
+      'stocks:price:AAPL',
+      {
+        ticker: 'AAPL',
+        currentPrice: 210,
+      },
+      60,
+    );
     expect(rabbitMqService.publish).toHaveBeenCalledWith(
       'stock.price',
       'stock.price.updated',
@@ -207,6 +289,9 @@ describe('StocksService', () => {
         new: true,
         runValidators: true,
       },
+    );
+    expect(redisService.deleteByPattern).toHaveBeenCalledWith(
+      'stocks:catalogue:*',
     );
     expect(rabbitMqService.publish).not.toHaveBeenCalled();
   });

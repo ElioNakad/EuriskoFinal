@@ -25,7 +25,7 @@ import {
   SellOrderStatus,
 } from './schemas/sell-order.schema';
 
-const PORTFOLIO_SUMMARY_TTL_SECONDS = 60;
+const DEFAULT_PORTFOLIO_SUMMARY_TTL_SECONDS = 60;
 
 type LeanStock = Stock & { _id: Types.ObjectId };
 type LeanBuyOrder = BuyOrder & { _id: Types.ObjectId };
@@ -420,7 +420,7 @@ export class OrdersService {
     await this.redisService.set(
       cacheKey,
       summary,
-      PORTFOLIO_SUMMARY_TTL_SECONDS,
+      this.getPortfolioSummaryTtlSeconds(),
     );
 
     return summary;
@@ -439,6 +439,14 @@ export class OrdersService {
 
   private getPortfolioSummaryCacheKey(userId: string): string {
     return `portfolio-summary:${userId}`;
+  }
+
+  private getPortfolioSummaryTtlSeconds(): number {
+    const value = Number(process.env.PORTFOLIO_SUMMARY_CACHE_TTL_SECONDS);
+
+    return Number.isInteger(value) && value > 0
+      ? value
+      : DEFAULT_PORTFOLIO_SUMMARY_TTL_SECONDS;
   }
 
   private async assertActiveMemberForTrading(
