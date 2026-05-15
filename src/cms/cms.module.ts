@@ -10,6 +10,7 @@ import { CmsController } from './cms.controller';
 import { CmsService } from './cms.service';
 import { CmsAdminGuard } from './guards/cms-admin.guard';
 import { CmsSuperAdminGuard } from './guards/cms-super-admin.guard';
+import { CmsSupportAgentGuard } from './guards/cms-support-agent.guard';
 import { CmsWithdrawalReviewGuard } from './guards/cms-withdrawal-review.guard';
 import { CmsAccount, CmsAccountSchema } from './schemas/cms-account.schema';
 
@@ -37,6 +38,7 @@ import { CmsAccount, CmsAccountSchema } from './schemas/cms-account.schema';
     JwtAuthGuard,
     CmsAdminGuard,
     CmsSuperAdminGuard,
+    CmsSupportAgentGuard,
     CmsWithdrawalReviewGuard,
   ],
   exports: [CmsService],

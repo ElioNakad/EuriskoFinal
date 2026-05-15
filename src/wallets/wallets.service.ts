@@ -458,6 +458,24 @@ export class WalletsService {
     };
   }
 
+  async getMemberTransactionHistoryForCms(
+    memberId: string,
+    query: TransactionHistoryQueryDto,
+  ): Promise<TransactionHistoryResponse> {
+    const memberObjectId = this.toObjectId(memberId, 'Invalid member id');
+    const member = await this.usersService.findById(memberId);
+
+    if (!member) {
+      throw new NotFoundException('Member account not found');
+    }
+
+    if (member.role !== 'member') {
+      throw new BadRequestException('Target account must be a member');
+    }
+
+    return this.getTransactionHistory(memberObjectId.toString(), query);
+  }
+
   async requestWithdrawal(
     userId: string,
     amount: number,

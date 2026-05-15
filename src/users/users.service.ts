@@ -82,6 +82,28 @@ export class UsersService {
     };
   }
 
+  async getMemberProfileForCms(memberId: string) {
+    if (!Types.ObjectId.isValid(memberId)) {
+      throw new BadRequestException('Invalid member id');
+    }
+
+    const member = await this.userModel
+      .findOne({
+        _id: new Types.ObjectId(memberId),
+        role: 'member',
+      })
+      .select('-password')
+      .lean();
+
+    if (!member) {
+      throw new NotFoundException('Member account not found');
+    }
+
+    return {
+      member,
+    };
+  }
+
   async suspendMemberAccount(
     memberId: string,
     reason: string,
