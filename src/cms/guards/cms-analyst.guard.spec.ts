@@ -43,6 +43,14 @@ describe('CmsAnalystGuard', () => {
     ).toThrow(ForbiddenException);
   });
 
+  it('rejects cms support agents', () => {
+    expect(() =>
+      guard.canActivate(
+        createContext({ accountType: 'cms', role: 'support-agent' }),
+      ),
+    ).toThrow(ForbiddenException);
+  });
+
   it('rejects non-cms accounts', () => {
     expect(() =>
       guard.canActivate(
