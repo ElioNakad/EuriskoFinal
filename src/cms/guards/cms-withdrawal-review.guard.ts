@@ -14,16 +14,16 @@ type CmsRequest = Request & {
 };
 
 @Injectable()
-export class CmsAnalystGuard implements CanActivate {
+export class CmsWithdrawalReviewGuard implements CanActivate {
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<CmsRequest>();
-    const allowedRoles = ['analyst', 'super-admin'];
+    const allowedRoles = ['support-agent', 'super-admin'];
 
     if (
       request.user?.accountType !== 'cms' ||
       !allowedRoles.includes(request.user.role ?? '')
     ) {
-      throw new ForbiddenException('Analyst access required');
+      throw new ForbiddenException('Withdrawal review access required');
     }
 
     return true;
