@@ -50,6 +50,33 @@ export class MailService {
     }
   }
 
+  async sendTradeConfirmation(
+    email: string,
+    side: 'buy' | 'sell',
+    ticker: string,
+    numberOfShares: number,
+    pricePerShare: number,
+    totalAmount: number,
+  ): Promise<void> {
+    const tradeSide = side === 'buy' ? 'Buy' : 'Sell';
+
+    try {
+      await this.transporter.sendMail({
+        from: process.env.EMAIL,
+        to: email,
+        subject: `${tradeSide} Trade Confirmation - ${ticker}`,
+        text: `Your ${side} order for ${numberOfShares} share(s) of ${ticker} was filled at $${pricePerShare} per share for a total of $${totalAmount}.`,
+      });
+    } catch (error) {
+      throw new InternalServerErrorException(
+        'Failed to send trade confirmation email',
+        {
+          cause: error,
+        },
+      );
+    }
+  }
+
   async sendWithdrawalApproved(email: string, amount: number): Promise<void> {
     try {
       await this.transporter.sendMail({

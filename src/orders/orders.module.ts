@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 
 import { AuthModule } from '../auth/auth.module';
+import { MailModule } from '../mail/mail.module';
 import { RedisModule } from '../redis/redis.module';
 import { Stock, StockSchema } from '../stocks/schemas/stock.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
@@ -16,6 +17,7 @@ import { OrdersService } from './orders.service';
 @Module({
   imports: [
     AuthModule,
+    MailModule,
     RedisModule,
     UsersModule,
     MongooseModule.forFeature([
