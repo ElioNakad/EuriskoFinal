@@ -7,6 +7,7 @@ import { RedisService } from '../redis/redis.service';
 import { Stock } from '../stocks/schemas/stock.schema';
 import { User } from '../users/schemas/user.schema';
 import { Wallet } from '../wallets/schemas/wallet.schema';
+import { MailService } from '../mail/mail.service';
 import { BuyOrder, BuyOrderStatus } from './schemas/buy-order.schema';
 import { SellOrder, SellOrderStatus } from './schemas/sell-order.schema';
 import { OrdersService } from './orders.service';
@@ -25,6 +26,7 @@ describe('OrdersService', () => {
     };
   };
   let userModel: {
+    findById: jest.Mock;
     collection: {
       updateOne: jest.Mock;
     };
@@ -44,6 +46,9 @@ describe('OrdersService', () => {
     get: jest.Mock;
     set: jest.Mock;
     delete: jest.Mock;
+  };
+  let mailService: {
+    sendTradeConfirmation: jest.Mock;
   };
   let session: {
     withTransaction: jest.Mock;
@@ -70,6 +75,7 @@ describe('OrdersService', () => {
       },
     };
     userModel = {
+      findById: jest.fn(),
       collection: {
         updateOne: jest.fn(),
       },
@@ -90,6 +96,14 @@ describe('OrdersService', () => {
       set: jest.fn(),
       delete: jest.fn(),
     };
+    mailService = {
+      sendTradeConfirmation: jest.fn(),
+    };
+    userModel.findById.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue(null),
+      }),
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -124,6 +138,10 @@ describe('OrdersService', () => {
           provide: RedisService,
           useValue: redisService,
         },
+        {
+          provide: MailService,
+          useValue: mailService,
+        },
       ],
     }).compile();
 
@@ -140,6 +158,7 @@ describe('OrdersService', () => {
       session: jest.fn().mockReturnValue({
         lean: jest.fn().mockResolvedValue({
           _id: new Types.ObjectId(stockId),
+          ticker: 'AAPL',
           currentPrice: 25,
           isListed: true,
           availableShares: 10,
@@ -150,6 +169,13 @@ describe('OrdersService', () => {
     stockModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
     walletModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
     buyOrderModel.create.mockResolvedValue([order]);
+    userModel.findById.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          email: 'trader@example.com',
+        }),
+      }),
+    });
 
     await expect(
       service.placeMarketBuyOrder(userId, {
@@ -215,6 +241,14 @@ describe('OrdersService', () => {
     expect(redisService.delete).toHaveBeenCalledWith(
       `portfolio-summary:${userId}`,
     );
+    expect(mailService.sendTradeConfirmation).toHaveBeenCalledWith(
+      'trader@example.com',
+      'buy',
+      'AAPL',
+      4,
+      25,
+      100,
+    );
     expect(session.endSession).toHaveBeenCalled();
   });
 
@@ -245,6 +279,7 @@ describe('OrdersService', () => {
 
     expect(buyOrderModel.create).not.toHaveBeenCalled();
     expect(redisService.delete).not.toHaveBeenCalled();
+    expect(mailService.sendTradeConfirmation).not.toHaveBeenCalled();
     expect(session.endSession).toHaveBeenCalled();
   });
 
@@ -305,6 +340,7 @@ describe('OrdersService', () => {
       session: jest.fn().mockReturnValue({
         lean: jest.fn().mockResolvedValue({
           _id: stockId,
+          ticker: 'MSFT',
           currentPrice: 30,
           isListed: true,
         }),
@@ -317,6 +353,13 @@ describe('OrdersService', () => {
     walletModel.collection.updateOne.mockResolvedValue({ modifiedCount: 1 });
     sellOrderModel.create.mockResolvedValue([sellOrder]);
     redisService.get.mockResolvedValue(summary);
+    userModel.findById.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue({
+          email: 'trader@example.com',
+        }),
+      }),
+    });
 
     await expect(
       service.closeMarketSellOrder(userId, {
@@ -397,6 +440,14 @@ describe('OrdersService', () => {
     );
     expect(redisService.get).toHaveBeenCalledWith(
       `portfolio-summary:${userId}`,
+    );
+    expect(mailService.sendTradeConfirmation).toHaveBeenCalledWith(
+      'trader@example.com',
+      'sell',
+      'MSFT',
+      4,
+      30,
+      120,
     );
     expect(session.endSession).toHaveBeenCalled();
   });

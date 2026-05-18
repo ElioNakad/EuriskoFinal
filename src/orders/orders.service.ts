@@ -8,6 +8,7 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Connection, Model, Types } from 'mongoose';
 
+import { MailService } from '../mail/mail.service';
 import { RedisService } from '../redis/redis.service';
 import { Stock, StockDocument } from '../stocks/schemas/stock.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
@@ -78,6 +79,8 @@ export class OrdersService {
     private readonly sellOrderModel: Model<SellOrderDocument>,
 
     private readonly redisService: RedisService,
+
+    private readonly mailService: MailService,
   ) {}
 
   async placeMarketBuyOrder(userId: string, dto: PlaceMarketBuyOrderDto) {
@@ -92,6 +95,14 @@ export class OrdersService {
 
     try {
       let order: BuyOrderDocument | undefined;
+      let tradeConfirmation:
+        | {
+            ticker: string;
+            numberOfShares: number;
+            pricePerShare: number;
+            totalAmount: number;
+          }
+        | undefined;
 
       await session.withTransaction(async () => {
         await this.assertActiveMemberForTrading(userObjectId, session);
@@ -110,6 +121,12 @@ export class OrdersService {
 
         const costPerShare = stock.currentPrice;
         const totalCost = costPerShare * dto.numberOfShares;
+        tradeConfirmation = {
+          ticker: stock.ticker,
+          numberOfShares: dto.numberOfShares,
+          pricePerShare: costPerShare,
+          totalAmount: totalCost,
+        };
 
         const stockUpdate = await this.stockModel.collection.updateOne(
           {
@@ -163,6 +180,11 @@ export class OrdersService {
       });
 
       await this.evictPortfolioSummary(userId);
+      await this.sendTradeConfirmationEmail(
+        userObjectId,
+        'buy',
+        tradeConfirmation,
+      );
 
       return {
         message: 'Buy order filled',
@@ -191,6 +213,14 @@ export class OrdersService {
 
     try {
       let sellOrder: SellOrderDocument | undefined;
+      let tradeConfirmation:
+        | {
+            ticker: string;
+            numberOfShares: number;
+            pricePerShare: number;
+            totalAmount: number;
+          }
+        | undefined;
 
       await session.withTransaction(async () => {
         await this.assertActiveMemberForTrading(userObjectId, session);
@@ -234,6 +264,12 @@ export class OrdersService {
         const proceeds = sellPricePerShare * sharesToSell;
         const profitLoss = proceeds - costBasis;
         const isFullClose = sharesToSell === buyOrder.availableShares;
+        tradeConfirmation = {
+          ticker: stock.ticker,
+          numberOfShares: sharesToSell,
+          pricePerShare: sellPricePerShare,
+          totalAmount: proceeds,
+        };
 
         const buyOrderUpdate = await this.buyOrderModel.collection.updateOne(
           {
@@ -309,6 +345,11 @@ export class OrdersService {
       });
 
       await this.evictPortfolioSummary(userId);
+      await this.sendTradeConfirmationEmail(
+        userObjectId,
+        'sell',
+        tradeConfirmation,
+      );
       const portfolioSummary = await this.getPortfolioSummary(userId);
 
       return {
@@ -432,6 +473,51 @@ export class OrdersService {
     } catch (error) {
       this.logger.error(
         `Failed to evict portfolio summary cache for user ${userId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+  }
+
+  private async sendTradeConfirmationEmail(
+    userObjectId: Types.ObjectId,
+    side: 'buy' | 'sell',
+    trade:
+      | {
+          ticker: string;
+          numberOfShares: number;
+          pricePerShare: number;
+          totalAmount: number;
+        }
+      | undefined,
+  ): Promise<void> {
+    if (!trade) {
+      return;
+    }
+
+    try {
+      const user = await this.userModel
+        .findById(userObjectId)
+        .select('email')
+        .lean<Pick<User, 'email'> | null>();
+
+      if (!user?.email) {
+        this.logger.warn(
+          `Trade confirmation skipped because user ${userObjectId.toString()} has no email`,
+        );
+        return;
+      }
+
+      await this.mailService.sendTradeConfirmation(
+        user.email,
+        side,
+        trade.ticker,
+        trade.numberOfShares,
+        trade.pricePerShare,
+        trade.totalAmount,
+      );
+    } catch (error) {
+      this.logger.error(
+        'Failed to send trade confirmation email',
         error instanceof Error ? error.stack : String(error),
       );
     }

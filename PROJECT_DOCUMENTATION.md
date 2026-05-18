@@ -1,276 +1,463 @@
-# Eurisko Final Project Documentation
+# Eurisko Backend - Dev Notes
 
-## 1. Big Picture
 
-Eurisko Final is a NestJS backend for a stock-trading style application. It handles member registration, OTP verification, JWT login, wallet deposits through Stripe, withdrawals, stock management, market buy/sell orders, portfolio summaries, transaction history, and stock price alerts.
+## Quick Picture
 
-At a high level, the system combines:
+The app does these main things:
 
-- A REST API for authentication, wallet actions, stock lookup/management, alerts, and portfolio summaries.
-- A Socket.IO gateway for real-time market buy and sell order actions.
-- MongoDB for permanent business data.
-- Redis for temporary state and short-lived cache.
-- RabbitMQ for stock price update events.
-- Nodemailer for OTP, payment success, and stock alert emails.
-- Stripe Checkout and webhooks for wallet funding.
+- lets members register with OTP email verification
+- lets members log in with JWT
+- lets CMS users log in too, with roles like `super-admin`, `administrator`, `analyst`, and `support-agent`
+- lets users fund their wallet with Stripe Checkout
+- listens to Stripe webhooks and updates wallet balances
+- lets users request withdrawals
+- lets CMS users approve/reject withdrawals and manually adjust wallets
+- stores stocks and stock price history
+- lets users buy/sell stocks through WebSockets
+- calculates portfolio summaries
+- lets users create stock price alerts
+- publishes stock price changes through RabbitMQ so alerts can react
+- uses Redis for OTP/temp data and some cache
 
-The app is packaged as a Docker Compose stack with services for the NestJS API, MongoDB replica set, Redis, and RabbitMQ.
+## Tech Used
 
-## 2. Runtime Architecture
+- **NestJS 11**: main backend framework
+- **TypeScript**: language
+- **MongoDB + Mongoose**: database and schemas
+- **MongoDB transactions**: used for wallet deposits, buy orders, sell orders, wallet adjustments, etc.
+- **Redis / ioredis**: OTP state and cached data
+- **RabbitMQ / amqplib**: stock price update event bus
+- **Socket.IO**: WebSocket order flow
+- **JWT**: auth tokens
+- **bcrypt**: password hashing
+- **class-validator / class-transformer**: DTO validation
+- **Stripe**: wallet deposit checkout and webhook verification
+- **Nodemailer with Gmail**: OTP, payment, withdrawal, CMS password, and stock alert emails
+- **Jest**: tests
+- **Docker Compose**: local app + MongoDB + Redis + RabbitMQ stack
 
-The application starts in `src/main.ts`. It creates the Nest app with raw request bodies enabled, installs a global validation pipe, then listens on `PORT` or `3000`.
+## How The App Starts
 
-Raw request body support is important because Stripe webhook verification requires the exact raw payload.
+Entry point:
 
-The root module is `src/app.module.ts`. It loads environment variables globally, connects Mongoose to `MONGO_URI`, then imports the application modules:
+- `src/main.ts`
 
-- `AuthModule`
-- `UsersModule`
-- `StocksModule`
-- `WalletsModule`
-- `OrdersModule`
-- `RabbitMqModule`
-- `StockAlertsModule`
+What happens there:
 
-The main request validation behavior is:
+- creates the Nest app
+- enables `rawBody: true`, which is needed for Stripe webhook signature verification
+- adds `HttpExceptionFilter` globally
+- adds `LoggingInterceptor` globally
+- adds a global `ValidationPipe`
+- listens on `process.env.PORT` or `3000`
 
-- Unknown DTO fields are stripped with `whitelist: true`.
-- Unknown DTO fields are rejected with `forbidNonWhitelisted: true`.
-- Query/body values are transformed into DTO target types with `transform: true`.
+Root module:
 
-## 3. External Services
+- `src/app.module.ts`
 
-### MongoDB
+What it wires together:
 
-MongoDB stores durable application data:
+- loads env vars with `ConfigModule`
+- validates env vars with `src/config/env.validation.ts`
+- connects Mongoose using `MONGO_URI`
+- registers the main modules:
+  - `AuthModule`
+  - `UsersModule`
+  - `StocksModule`
+  - `WalletsModule`
+  - `OrdersModule`
+  - `RabbitMqModule`
+  - `StockAlertsModule`
+  - `CmsModule`
+  - `AnalystModule`
+- adds `RequestIdMiddleware` to every route
 
-- Users
-- Wallets
-- Wallet transactions
-- Withdrawal requests
-- Stocks
-- Stock history snapshots
-- Buy orders
-- Sell orders
-- Stock alerts
+Global validation behavior:
 
-The Docker setup runs MongoDB as a single-node replica set so Mongoose transactions can work.
+- unknown fields are removed
+- unknown fields are rejected
+- query/body values are transformed into proper DTO types
 
-### Redis
-
-Redis is used for temporary and cached data:
-
-- Pending signup data: `signup:{email}`
-- OTP-verified signup data: `verified:{email}`
-- Cached portfolio summaries: `portfolio-summary:{userId}`
-
-The `RedisService` serializes values as JSON and stores them with explicit TTL values.
-
-### RabbitMQ
-
-RabbitMQ carries stock price update events.
-
-The current event channel is:
-
-- Exchange: `stock.price`
-- Routing key: `stock.price.updated`
-- Queue: `stock-alerts.price-updated`
-
-When a stock price changes, `StocksService` publishes an event. `StockAlertsService` consumes the event and triggers any crossed alerts.
-
-### Stripe
-
-Stripe Checkout is used to create wallet deposit sessions. Stripe webhooks confirm successful payments and update wallet balances.
-
-Required Stripe configuration:
-
-- `STRIPE_SECRET_KEY`
-- `STRIPE_WEBHOOK_SECRET`
-
-### Email
-
-Nodemailer is configured with Gmail credentials.
-
-Email is used for:
-
-- OTP codes during registration
-- Wallet payment success confirmations
-- Triggered stock alert notifications
-
-Required email configuration:
-
-- `EMAIL`
-- `EMAIL_PASS`
-
-## 4. Project Layout
+## Folder Layout
 
 ```text
 src/
-  app.module.ts
   main.ts
+  app.module.ts
+  app.controller.ts
+  app.service.ts
   auth/
   users/
-  stocks/
+  cms/
   wallets/
+  stocks/
   orders/
   stock-alerts/
+  analyst/
   redis/
   rabbitmq/
   mail/
   common/
+  config/
   types/
 test/
-docker-compose.yml
 Dockerfile
+docker-compose.yml
 package.json
 ```
 
-The code is organized by business capability. Each major domain module owns its controller, service, DTOs, schemas, and tests where present.
+The code is mostly organized by business module. So if you need wallet behavior, start in `src/wallets`. If you need CMS/admin behavior, start in `src/cms`, and so on.
 
-## 5. Authentication And Users
+## Common App Behavior
 
-Authentication is implemented in `src/auth`.
+### Request IDs
+
+Files:
+
+- `src/common/middleware/request-id.middleware.ts`
+
+Every HTTP request gets an `x-request-id`. If the client sends one, the app keeps it. If not, the app generates one.
+
+### Error Responses
+
+Files:
+
+- `src/common/filters/http-exception.filter.ts`
+- `src/common/filters/ws-exception.filter.ts`
+
+HTTP errors get shaped like this:
+
+```json
+{
+  "success": false,
+  "statusCode": 400,
+  "timestamp": "2026-05-15T...",
+  "path": "/some/path",
+  "method": "POST",
+  "requestId": "uuid",
+  "message": "what went wrong",
+  "error": "Bad Request"
+}
+```
+
+WebSocket validation errors emit an event like `order_rejected`.
+
+### Logging
+
+Files:
+
+- `src/common/interceptors/logging.interceptor.ts`
+
+Logs method, URL, status code, duration, request ID, and user-ish info when available.
+
+### Pagination
+
+Files:
+
+- `src/common/dto/pagination-query.dto.ts`
+
+Common query params:
+
+- `page`, default `1`
+- `limit`, default `20`, max `100`
+
+## Auth Module
+
+Folder:
+
+- `src/auth`
+
+Main files:
+
+- `auth.controller.ts`: exposes auth endpoints
+- `auth.service.ts`: signup/login logic
+- `auth.module.ts`: wires JWT, users, Redis, mail, wallets, CMS
+- `dto/*.ts`: request body validation
+- `guards/jwt-auth.guard.ts`: HTTP JWT guard
+- `guards/ws-jwt-auth.guard.ts`: WebSocket JWT guard
+- `types/authenticated-socket.type.ts`: socket user type
+
+### Auth Endpoints
+
+Base path: `/auth`
+
+| Method | Endpoint | Auth | What it does |
+|---|---|---|---|
+| `POST` | `/auth/register` | public | Starts member signup, validates age, stores signup + OTP in Redis, emails OTP |
+| `POST` | `/auth/verify-otp` | public | Checks OTP and moves signup data from `signup:{email}` to `verified:{email}` |
+| `POST` | `/auth/set-password` | public | Creates permanent Mongo user after OTP verification |
+| `POST` | `/auth/login` | public | Logs in either a member or CMS account and returns JWT |
 
 ### Signup Flow
 
-Signup is intentionally staged:
+1. User calls `POST /auth/register`.
+2. App checks age is at least 18.
+3. App checks email is not already used by a member or CMS account.
+4. App creates a 6 digit OTP.
+5. Signup data goes to Redis key `signup:{email}` for 10 minutes.
+6. OTP is emailed.
+7. User calls `POST /auth/verify-otp`.
+8. If valid, data moves to Redis key `verified:{email}` for 10 minutes.
+9. User calls `POST /auth/set-password`.
+10. Password is hashed with bcrypt.
+11. A `User` document is created.
+12. Temporary Redis data is deleted.
 
-1. `POST /auth/register`
-2. User data and generated OTP are stored in Redis under `signup:{email}` for 10 minutes.
-3. OTP is sent by email.
-4. `POST /auth/verify-otp`
-5. Verified signup data is moved to Redis under `verified:{email}` for 10 minutes.
-6. `POST /auth/set-password`
-7. Password is hashed with bcrypt.
-8. A permanent user is created in MongoDB.
-9. Temporary Redis verification data is deleted.
-
-Users must be at least 18 years old. Duplicate email and national ID values are rejected.
+Note: `auth.service.ts` currently logs OTPs with `console.log('OTP:', otp)`. Useful locally, bad idea in production.
 
 ### Login Flow
 
-`POST /auth/login` checks the user's email and bcrypt password. On success, it returns:
+`POST /auth/login` first checks regular members, then CMS accounts.
 
-- A JWT access token.
-- Basic user data.
-- `requiresWalletFunding`, based on whether the user already has a wallet.
+JWT payload includes:
 
-JWT payloads include:
+- `sub`: account id
+- `email`
+- `role`
+- `accountType`: `member` or `cms`
 
-- `sub`: user ID
-- `email`: user email
+Member login also returns `requiresWalletFunding`, which is based on whether the user already has a wallet.
 
-Tokens are configured to expire in 7 days.
+### Guards
 
-### User Model
+HTTP:
 
-Stored in `src/users/schemas/user.schema.ts`.
+- `JwtAuthGuard` expects `Authorization: Bearer <token>`.
+- If the token is for a member, it also checks the user is active.
+- It attaches `request.user = { userId, email, role, accountType }`.
 
-Fields:
+WebSocket:
+
+- `WsJwtAuthGuard` accepts token from `handshake.auth.token` or `Authorization` header.
+- Bad socket auth disconnects the client or emits an error event.
+
+## Users Module
+
+Folder:
+
+- `src/users`
+
+Main files:
+
+- `users.service.ts`: user create/find/admin profile/status logic
+- `users.module.ts`: registers schemas and exports service
+- `schemas/user.schema.ts`: member user collection
+- `schemas/member-account-status-log.schema.ts`: suspension/reinstatement logs
+
+No controller here. Other modules call `UsersService`.
+
+### User Data
+
+`User` fields:
 
 - `fullName`
 - `email`
 - `nationalId`
 - `dateOfBirth`
 - `password`
-- `role`, default `member`
-- `isActive`, default `true`
+- `role`, defaults to `member`
+- `isActive`, defaults to `true`
+- `lastTradingActivityAt`
 
-Indexes exist for `email` and `nationalId`.
+Indexes:
 
-## 6. Guards And WebSocket Authentication
+- `email`
+- `nationalId`
 
-HTTP endpoints use `JwtAuthGuard`. It expects:
+### What UsersService Does
 
-```text
-Authorization: Bearer <token>
-```
+- creates users and blocks duplicate email/national ID
+- finds users by email or ID
+- returns CMS-facing member profile without password
+- returns member registration metrics
+- suspends/reinstates member accounts
+- writes status logs when a CMS admin changes member status
 
-The guard verifies the JWT and attaches:
+## CMS Module
 
-```ts
-request.user = {
-  userId: payload.sub,
-  email: payload.email,
-};
-```
+Folder:
 
-WebSocket events use `WsJwtAuthGuard`. It accepts the token from either:
+- `src/cms`
 
-- `client.handshake.auth.token`
-- `client.handshake.headers.authorization`
+Main files:
 
-Unauthenticated socket clients are disconnected during initial connection, and unauthorized event calls emit either `order_rejected` or `portfolio_summary_error`.
+- `cms.controller.ts`: CMS/admin REST endpoints
+- `cms.service.ts`: CMS account creation and bootstrap seed
+- `cms.module.ts`: registers CMS schemas and shares service
+- `dto/*.ts`: CMS request validation
+- `guards/*.ts`: role guards
+- `schemas/cms-account.schema.ts`: CMS accounts
+- `schemas/audit-trail.schema.ts`: audit trail records
 
-## 7. Wallets And Payments
+### CMS Roles
 
-Wallet logic is implemented in `src/wallets`.
+Roles are:
 
-### Wallet Model
+- `super-admin`
+- `administrator`
+- `analyst`
+- `support-agent`
 
-Fields:
+The app seeds one super admin on module init:
 
-- `userId`: unique reference to `User`
-- `balance`: numeric balance, default `0`
-- `lastDepositAt`: date of last successful deposit
+- email: `omar@gmail.com`
+- password: `Pass1234`
+- role: `super-admin`
 
-Each user can have one wallet.
+That is convenient for local dev, but obviously should be changed for real deployment.
+
+### CMS Guards
+
+- `CmsSuperAdminGuard`: only `super-admin`
+- `CmsAdminGuard`: `administrator` or `super-admin`
+- `CmsAnalystGuard`: `analyst`, `administrator`, or `super-admin`
+- `CmsSupportAgentGuard`: `support-agent`, `administrator`, or `super-admin`
+- `CmsWithdrawalReviewGuard`: `support-agent`, `administrator`, or `super-admin`
+
+All of these expect the JWT to already be validated by `JwtAuthGuard`.
+
+### CMS Endpoints
+
+Base path: `/cms/accounts`
+
+| Method | Endpoint | Roles | What it does |
+|---|---|---|---|
+| `POST` | `/cms/accounts` | super admin | Creates a CMS user and emails a temporary password |
+| `GET` | `/cms/accounts/members/metrics` | admin/super admin | Member registration stats |
+| `GET` | `/cms/accounts/members/:memberId` | support/admin/super admin | Member profile for CMS |
+| `GET` | `/cms/accounts/members/:memberId/transactions/history` | support/admin/super admin | Member transaction history |
+| `POST` | `/cms/accounts/members/:memberId/suspend` | admin/super admin | Suspends a member account with reason |
+| `POST` | `/cms/accounts/members/:memberId/reinstate` | admin/super admin | Reinstates a member account with reason |
+| `POST` | `/cms/accounts/members/:memberId/wallet/adjust` | admin/super admin | Manual wallet credit/debit with audit trail |
+| `GET` | `/cms/accounts/withdrawal-requests` | support/admin/super admin | Paginated withdrawal requests |
+| `GET` | `/cms/accounts/withdrawal-requests/pending-review` | support/admin/super admin | Pending withdrawal requests |
+| `PATCH` | `/cms/accounts/withdrawal-requests/:requestId/status` | withdrawal review roles | Approves or rejects a withdrawal |
+
+## Wallets Module
+
+Folder:
+
+- `src/wallets`
+
+Main files:
+
+- `wallets.controller.ts`: wallet REST endpoints
+- `wallets.service.ts`: Stripe, deposits, withdrawals, transaction history, CMS wallet ops
+- `wallets.module.ts`: registers wallet schemas and exports service
+- `dto/*.ts`: request/query validation
+- `schemas/wallet.schema.ts`
+- `schemas/wallet-transaction.schema.ts`
+- `schemas/withdrawal-request.schema.ts`
+
+### Wallet Endpoints
+
+Base path: `/wallet`
+
+| Method | Endpoint | Auth | What it does |
+|---|---|---|---|
+| `POST` | `/wallet/deposit-session` | member JWT | Creates Stripe Checkout session |
+| `POST` | `/wallet/withdrawal-request` | member JWT | Creates a withdrawal request |
+| `GET` | `/wallet/transactions/history` | member JWT | Combined deposit/withdrawal/buy/sell history |
+| `POST` | `/wallet/webhook` | public Stripe | Stripe webhook for completed checkout sessions |
 
 ### Deposit Flow
 
-1. Authenticated user calls `POST /wallet/deposit-session`.
-2. Backend creates a Stripe Checkout session.
-3. Stripe redirects the user to payment.
-4. Stripe sends `checkout.session.completed` to `POST /wallet/webhook`.
-5. Backend verifies the webhook signature.
-6. Inside a Mongo transaction:
-   - Creates or updates the wallet.
-   - Increments wallet balance.
-   - Stores a completed wallet transaction.
-7. Sends payment success email.
+1. User calls `POST /wallet/deposit-session` with `{ "amount": 100 }`.
+2. `WalletsService` creates a Stripe Checkout session.
+3. Stripe redirects user to checkout.
+4. Stripe calls `POST /wallet/webhook`.
+5. App verifies `stripe-signature` using `STRIPE_WEBHOOK_SECRET`.
+6. If event is `checkout.session.completed`, app reads `userId` and `amount` from metadata.
+7. In a Mongo transaction:
+   - create wallet if missing
+   - increment wallet balance
+   - store `WalletTransaction` of type `deposit`
+8. Sends payment success email.
 
-Wallet deposit transactions store Stripe session IDs in `reference_id`. This field is unique and sparse, making repeated webhook delivery idempotent.
+Stripe session id is stored as `reference_id` with a unique sparse index, so duplicate webhook deliveries do not double-credit the wallet.
 
 ### Withdrawal Flow
 
-Authenticated users call `POST /wallet/withdrawal-request`.
+1. User calls `POST /wallet/withdrawal-request`.
+2. App checks wallet exists.
+3. App checks there was at least one deposit.
+4. App checks wallet balance is enough.
+5. App checks there is no other pending withdrawal.
+6. Creates a `WithdrawalRequest` with status `pending`.
 
-The service checks:
+The code has `withdrawalDelayMs = 0`. A comment shows this was probably meant to be 48 hours.
 
-- Amount is greater than zero.
-- Wallet exists.
-- Wallet has a previous deposit.
-- Withdrawal delay has passed.
-- Wallet has enough balance.
-- No other pending withdrawal exists.
+CMS approval/rejection is handled through CMS endpoints. Approval creates a completed wallet withdrawal transaction and decreases wallet balance. Rejection just updates the request status.
 
-The current `withdrawalDelayMs` is set to `0`, although the code comments show the intended 48-hour delay.
+### Wallet Data
 
-Withdrawal requests are stored separately from completed wallet transactions. Pending withdrawals are prevented with a partial unique index on `wallet_id` and `status: pending`.
+`Wallet`:
+
+- `userId`
+- `balance`
+- `lastDepositAt`
+
+`WalletTransaction`:
+
+- `wallet_id`
+- `transaction_type`: `deposit`, `withdrawal`, `manual_credit`, `manual_debit`
+- `amount`
+- `status`: currently only `completed`
+- `reference_id`
+
+`WithdrawalRequest`:
+
+- `wallet_id`
+- `amount`
+- `status`: `pending`, `seen`, `approved`, `rejected`
 
 ### Transaction History
 
-`GET /wallet/transactions/history` merges several sources into one reverse-chronological feed:
+`GET /wallet/transactions/history` and the CMS member history endpoint merge:
 
-- Wallet deposits
-- Wallet withdrawals
-- Pending/rejected withdrawal requests
-- Buy orders
-- Sell orders
+- wallet transactions
+- pending/rejected withdrawal requests
+- buy orders
+- sell orders
 
-Optional filters:
+Query params:
 
-- `type`: `deposit`, `withdrawal`, `buy`, or `sell`
-- `from`: ISO date
-- `to`: ISO date
+- `page`
+- `limit`
+- `type`: `deposit`, `withdrawal`, `buy`, `sell`
+- `from`
+- `to`
 
-## 8. Stocks
+## Stocks Module
 
-Stock logic is implemented in `src/stocks`.
+Folder:
 
-### Stock Model
+- `src/stocks`
 
-Fields:
+Main files:
+
+- `stocks.controller.ts`: stock REST endpoints
+- `stocks.service.ts`: stock create/list/search/update/delist, cache, price events
+- `stocks.module.ts`: registers stock schemas
+- `dto/*.ts`: create/update validation
+- `schemas/stock.schema.ts`: stock data + history hooks
+- `schemas/stock-history.schema.ts`: stock update snapshots
+
+### Stock Endpoints
+
+Base path: `/stocks`
+
+| Method | Endpoint | Auth | What it does |
+|---|---|---|---|
+| `POST` | `/stocks` | CMS analyst/admin/super admin | Creates a stock |
+| `GET` | `/stocks` | any JWT | Lists stocks with pagination |
+| `GET` | `/stocks/:name` | any JWT | Finds stock by ticker, despite param name being `name` |
+| `PATCH` | `/stocks/:ticker` | CMS analyst/admin/super admin | Updates stock by ticker |
+| `PATCH` | `/stocks/:ticker/delist` | CMS analyst/admin/super admin | Sets `isListed` to false |
+
+### Stock Data
+
+`Stock` fields:
 
 - `ticker`
 - `companyName`
@@ -281,338 +468,156 @@ Fields:
 - `description`
 - `isListed`
 
-`ticker` is unique.
+### Cache
+
+Redis keys:
+
+- `stocks:catalogue:page:{page}:limit:{limit}`
+- `stocks:price:{TICKER}`
+
+Catalogue cache is deleted when stocks are created/updated.
 
 ### Stock History
 
-Stock updates are snapshotted into the `stock_history` collection before mutations.
+The stock schema has Mongoose hooks that write old versions to `stock_history` before updates.
 
-History records contain:
+`StockHistory` fields:
 
 - `stockId`
-- `before`: previous stock document snapshot
+- `before`
 - `changedAt`
 - `operation`
 
-Mongoose pre-hooks capture history for:
-
-- `save`
-- `findOneAndUpdate`
-- `replaceOne`
-- `updateOne`
-- `updateMany`
-
 ### Stock Price Events
 
-When `currentPrice` changes through `updateByTicker`, `StocksService` publishes a RabbitMQ event:
+When `currentPrice` changes through `PATCH /stocks/:ticker`, the app publishes a RabbitMQ event:
 
 ```json
 {
   "ticker": "AAPL",
   "previousPrice": 100,
   "currentPrice": 110,
-  "changedAt": "2026-05-10T..."
+  "changedAt": "2026-05-15T..."
 }
 ```
 
-Stock alerts consume this event.
+Stock alerts consume this.
 
-## 9. Orders And Portfolio
+## Orders Module
 
-Order logic is implemented in `src/orders`.
+Folder:
 
-Orders are placed over WebSockets. Portfolio summaries can be requested through both REST and WebSockets.
+- `src/orders`
 
-### Buy Orders
+Main files:
 
-Socket event:
+- `orders.controller.ts`: REST portfolio endpoint
+- `orders.gateway.ts`: Socket.IO buy/sell/portfolio events
+- `orders.service.ts`: actual buy/sell/portfolio business logic
+- `orders.module.ts`: registers order schemas and gateway
+- `dto/*.ts`: socket payload validation
+- `schemas/buy-order.schema.ts`
+- `schemas/sell-order.schema.ts`
 
-```text
-market_buy_order
+### REST Endpoint
+
+Base path: `/orders`
+
+| Method | Endpoint | Auth | What it does |
+|---|---|---|---|
+| `GET` | `/orders/portfolio/summary` | member JWT | Returns cached/fresh portfolio summary |
+
+### WebSocket Auth
+
+Socket clients pass JWT like this:
+
+```js
+io("http://localhost:3000", {
+  auth: {
+    token: "Bearer <jwt>"
+  }
+});
 ```
 
-Payload:
+Or via the handshake `Authorization` header.
 
-```json
-{
-  "stockId": "mongo-stock-id",
-  "numberOfShares": 5
-}
-```
+### WebSocket Events
 
-The buy flow runs inside a MongoDB transaction:
+| Client emits | Payload | Success event | Failure event |
+|---|---|---|---|
+| `market_buy_order` | `{ stockId, numberOfShares }` | `order_filled` | `order_rejected` |
+| `market_sell_order` | `{ buyOrderId, numberOfShares? }` | `order_closed`, `portfolio_value_updated` | `order_rejected` |
+| `portfolio_summary` | `{}` | `portfolio_summary` | `portfolio_summary_error` |
 
-1. Validate user ID and stock ID.
-2. Find a listed stock.
-3. Calculate total cost from current stock price.
-4. Atomically decrement stock `availableShares`.
-5. Atomically decrement wallet `balance`.
-6. Create a filled buy order.
-7. Evict cached portfolio summary.
-8. Emit `order_filled`.
+`market_sell_order` also accepts `orderId` as an alias for `buyOrderId`.
 
-If anything fails, the transaction is rolled back and the client receives `order_rejected`.
+### Buy Flow
 
-### Sell Orders
+Buying runs in a Mongo transaction:
 
-Socket event:
+1. check user id and stock id
+2. make sure account is active
+3. find listed stock
+4. calculate total cost
+5. decrement stock `availableShares`
+6. decrement wallet balance
+7. create a filled `BuyOrder`
+8. evict portfolio summary cache
+9. emit `order_filled`
 
-```text
-market_sell_order
-```
+### Sell Flow
 
-Payload:
+Selling also runs in a Mongo transaction:
 
-```json
-{
-  "buyOrderId": "mongo-buy-order-id",
-  "numberOfShares": 2
-}
-```
+1. check user id and buy order id
+2. make sure account is active
+3. find user's open buy order
+4. calculate shares to sell
+5. load stock current price
+6. calculate cost basis, proceeds, profit/loss
+7. reduce buy order `availableShares`
+8. set `closedAt` if fully closed
+9. increment stock `availableShares`
+10. increment wallet balance by proceeds
+11. create a filled `SellOrder`
+12. evict and rebuild portfolio summary
+13. emit `order_closed` and `portfolio_value_updated`
 
-`orderId` is also accepted as an alias for `buyOrderId`.
+### Portfolio Cache
 
-The sell flow runs inside a MongoDB transaction:
+Redis key:
 
-1. Validate user ID and buy order ID.
-2. Find the user's open buy order.
-3. Determine shares to sell.
-4. Find the listed stock.
-5. Calculate proceeds, cost basis, and profit/loss.
-6. Reduce buy order `availableShares`.
-7. If fully closed, set `closedAt`.
-8. Increment stock `availableShares`.
-9. Increment wallet balance by proceeds.
-10. Create a filled sell order.
-11. Evict cached portfolio summary.
-12. Rebuild and emit portfolio summary.
+- `portfolio-summary:{userId}`
 
-Success emits:
+TTL comes from `PORTFOLIO_SUMMARY_CACHE_TTL_SECONDS`, default `60`.
 
-- `order_closed`
-- `portfolio_value_updated`
+## Stock Alerts Module
 
-Failure emits:
+Folder:
 
-- `order_rejected`
+- `src/stock-alerts`
 
-### Portfolio Summary
+Main files:
 
-REST endpoint:
+- `stock-alerts.controller.ts`: alert REST endpoints
+- `stock-alerts.service.ts`: alert CRUD + RabbitMQ consumer
+- `stock-alerts.module.ts`: registers schema and service
+- `dto/create-stock-alert.dto.ts`
+- `schemas/stock-alert.schema.ts`
 
-```text
-GET /orders/portfolio/summary
-```
+### Alert Endpoints
 
-Socket event:
+Base path: `/stock-alerts`
 
-```text
-portfolio_summary
-```
+All require member JWT.
 
-The summary groups open buy orders by stock and returns:
+| Method | Endpoint | What it does |
+|---|---|---|
+| `POST` | `/stock-alerts` | Creates an alert |
+| `GET` | `/stock-alerts` | Lists current user's alerts |
+| `DELETE` | `/stock-alerts/:id` | Cancels one active alert |
 
-- Shares held
-- Average cost per share
-- Total cost
-- Current price
-- Market value
-- Unrealized gain/loss
-- Portfolio totals
-
-Summaries are cached in Redis for 60 seconds and evicted after buy or sell orders.
-
-## 10. Stock Alerts
-
-Stock alerts are implemented in `src/stock-alerts`.
-
-Users can create alerts for a ticker crossing above or below a threshold. Alerts are triggered from RabbitMQ stock price update events.
-
-### Alert Model
-
-Fields:
-
-- `memberId`
-- `ticker`
-- `direction`: `above` or `below`
-- `thresholdPrice`
-- `status`: `active`, `triggered`, or `cancelled`
-- `emailEnabled`
-- `pushEnabled`
-- `triggeredAt`
-- `triggeredPrice`
-
-### Trigger Logic
-
-For `above` alerts:
-
-```text
-previousPrice < thresholdPrice <= currentPrice
-```
-
-For `below` alerts:
-
-```text
-previousPrice > thresholdPrice >= currentPrice
-```
-
-When triggered, an alert is marked `triggered`, timestamped, and emailed to the user. Push notifications are currently represented by a log message.
-
-## 11. REST API Reference
-
-### Auth
-
-#### `POST /auth/register`
-
-Body:
-
-```json
-{
-  "fullName": "Jane Doe",
-  "email": "jane@example.com",
-  "nationalId": "123456789",
-  "dateOfBirth": "1995-01-01"
-}
-```
-
-Response:
-
-```json
-{
-  "message": "OTP sent successfully"
-}
-```
-
-#### `POST /auth/verify-otp`
-
-Body:
-
-```json
-{
-  "email": "jane@example.com",
-  "otp": "123456"
-}
-```
-
-#### `POST /auth/set-password`
-
-Body:
-
-```json
-{
-  "email": "jane@example.com",
-  "password": "strongpass123"
-}
-```
-
-#### `POST /auth/login`
-
-Body:
-
-```json
-{
-  "email": "jane@example.com",
-  "password": "strongpass123"
-}
-```
-
-Response includes `accessToken`, `requiresWalletFunding`, and user details.
-
-### Stocks
-
-#### `POST /stocks`
-
-Creates a stock. This route is currently not guarded.
-
-Body:
-
-```json
-{
-  "ticker": "AAPL",
-  "companyName": "Apple Inc.",
-  "sector": "Technology",
-  "currentPrice": 180,
-  "availableShares": 1000,
-  "description": "Consumer technology company",
-  "isListed": true
-}
-```
-
-#### `GET /stocks`
-
-Requires JWT. Returns all stocks.
-
-#### `GET /stocks/:name`
-
-Requires JWT. Despite the parameter name, lookup is performed against `ticker` case-insensitively. Returns stock details plus `stockHistory`.
-
-#### `PATCH /stocks/:ticker`
-
-Updates a stock by ticker. This route is currently not guarded. If the current price changes, a RabbitMQ price update event is published.
-
-### Wallet
-
-#### `POST /wallet/deposit-session`
-
-Requires JWT.
-
-Body:
-
-```json
-{
-  "amount": 100
-}
-```
-
-Returns:
-
-```json
-{
-  "url": "https://checkout.stripe.com/..."
-}
-```
-
-#### `POST /wallet/webhook`
-
-Public Stripe webhook endpoint. Requires a valid `stripe-signature` header and raw Stripe payload.
-
-#### `POST /wallet/withdrawal-request`
-
-Requires JWT.
-
-Body:
-
-```json
-{
-  "amount": 50
-}
-```
-
-#### `GET /wallet/transactions/history`
-
-Requires JWT.
-
-Optional query examples:
-
-```text
-/wallet/transactions/history
-/wallet/transactions/history?type=buy
-/wallet/transactions/history?from=2026-01-01&to=2026-05-10
-```
-
-### Orders
-
-#### `GET /orders/portfolio/summary`
-
-Requires JWT. Returns cached or freshly computed portfolio summary.
-
-### Stock Alerts
-
-All stock alert routes require JWT.
-
-#### `POST /stock-alerts`
-
-Body:
+Create body:
 
 ```json
 {
@@ -623,199 +628,337 @@ Body:
 }
 ```
 
-#### `GET /stock-alerts`
+### Alert Data
 
-Returns the authenticated user's alerts.
+`StockAlert` fields:
 
-#### `DELETE /stock-alerts/:id`
+- `memberId`
+- `ticker`
+- `direction`: `above` or `below`
+- `thresholdPrice`
+- `status`: `active`, `triggered`, `cancelled`
+- `emailEnabled`
+- `pushEnabled`
+- `triggeredAt`
+- `triggeredPrice`
 
-Cancels an active alert owned by the authenticated user.
+### How Alerts Trigger
 
-## 12. WebSocket API Reference
+`StockAlertsService` subscribes to RabbitMQ on startup.
 
-The WebSocket gateway allows CORS from all origins.
+RabbitMQ channel:
 
-Authenticate by passing a JWT in:
+- exchange: `stock.price`
+- routing key: `stock.price.updated`
+- queue: `stock-alerts.price-updated`
 
-```js
-io("http://localhost:3000", {
-  auth: {
-    token: "Bearer <jwt>"
-  }
-});
-```
-
-or through the `Authorization` handshake header.
-
-### `market_buy_order`
-
-Client emits:
-
-```json
-{
-  "stockId": "mongo-stock-id",
-  "numberOfShares": 5
-}
-```
-
-Server success event:
+For above alerts:
 
 ```text
-order_filled
+previousPrice < thresholdPrice <= currentPrice
 ```
 
-Server failure event:
+For below alerts:
 
 ```text
-order_rejected
+previousPrice > thresholdPrice >= currentPrice
 ```
 
-### `market_sell_order`
+When an alert triggers:
 
-Client emits:
+- status becomes `triggered`
+- `triggeredAt` and `triggeredPrice` are saved
+- email is sent
+- push notification is only logged right now
 
-```json
-{
-  "buyOrderId": "mongo-buy-order-id",
-  "numberOfShares": 2
-}
-```
+## Analyst Module
 
-Server success events:
+Folder:
+
+- `src/analyst`
+
+Main files:
+
+- `analyst.controller.ts`: analytics REST endpoints
+- `analyst.service.ts`: aggregation queries
+- `analyst.module.ts`: registers needed models
+- `dto/*.ts`: query validation
+
+Base path: `/analytics`
+
+All endpoints require JWT plus `CmsAnalystGuard`, meaning role must be `analyst`, `administrator`, or `super-admin`.
+
+| Method | Endpoint | What it does |
+|---|---|---|
+| `GET` | `/analytics/volume` | Trading volume for one stock over date range |
+| `GET` | `/analytics/stocks/top` | Top traded stocks |
+| `GET` | `/analytics/aum` | Assets under management |
+| `GET` | `/analytics/members/active` | Most active members |
+| `GET` | `/analytics/sectors` | Sector allocation |
+
+Important query params:
+
+- `/analytics/volume`: `stock_id`, `granularity` as `day` or `month`, `from`, `to`
+- `/analytics/stocks/top`: `page`, `limit`
+- `/analytics/members/active`: `days`, `limit`
+
+The service mostly uses Mongo aggregation pipelines across buy orders, sell orders, stocks, users, and wallets.
+
+## Redis Module
+
+Folder:
+
+- `src/redis`
+
+Main files:
+
+- `redis.service.ts`
+- `redis.module.ts`
+
+What it does:
+
+- wraps `ioredis`
+- stores JSON with TTL
+- reads JSON back
+- deletes a key
+- deletes by pattern using `scanStream`
+- quits Redis on module destroy
+
+Used for:
+
+- signup OTP data
+- verified signup data
+- stock catalogue cache
+- stock price cache
+- portfolio summary cache
+
+## RabbitMQ Module
+
+Folder:
+
+- `src/rabbitmq`
+
+Main files:
+
+- `rabbitmq.service.ts`
+- `rabbitmq.module.ts`
+- `rabbitmq.constants.ts`
+
+What it does:
+
+- connects to RabbitMQ on app bootstrap
+- publishes JSON messages to topic exchanges
+- consumes queues with prefetch
+- `ack`s successful messages
+- `nack`s failed messages without requeue
+
+Current constants:
+
+- exchange: `stock.price`
+- routing key: `stock.price.updated`
+- queue: `stock-alerts.price-updated`
+
+If RabbitMQ is unavailable, the service logs a warning instead of crashing immediately.
+
+## Mail Module
+
+Folder:
+
+- `src/mail`
+
+Main files:
+
+- `mail.service.ts`
+- `mail.module.ts`
+
+Uses Nodemailer with Gmail:
+
+- `EMAIL`
+- `EMAIL_PASS`
+
+Sends:
+
+- OTP email
+- payment success email
+- withdrawal approved email
+- withdrawal rejected email
+- stock alert triggered email
+- CMS temporary password email
+
+## App Controller
+
+Files:
+
+- `src/app.controller.ts`
+- `src/app.service.ts`
+
+Only has:
+
+| Method | Endpoint | What it does |
+|---|---|---|
+| `GET` | `/` | returns the app service hello string |
+
+## Environment Variables
+
+Validated by:
+
+- `src/config/env.validation.ts`
+
+Required:
 
 ```text
-order_closed
-portfolio_value_updated
+MONGO_URI
+JWT_SECRET
+STRIPE_SECRET_KEY
+STRIPE_WEBHOOK_SECRET
 ```
 
-Server failure event:
-
-```text
-order_rejected
-```
-
-### `portfolio_summary`
-
-Client emits:
-
-```json
-{}
-```
-
-Server success event:
-
-```text
-portfolio_summary
-```
-
-Server failure event:
-
-```text
-portfolio_summary_error
-```
-
-## 13. Data Model Summary
-
-### User
-
-Permanent account identity and login credentials.
-
-### Wallet
-
-One wallet per user, with current balance and last deposit timestamp.
-
-### WalletTransaction
-
-Completed deposit and withdrawal records. Deposits currently come from Stripe webhooks.
-
-### WithdrawalRequest
-
-Tracks withdrawal requests and their approval lifecycle.
-
-### Stock
-
-Tradable stock instrument with price and available share inventory.
-
-### StockHistory
-
-Audit-like snapshots of stocks before update operations.
-
-### BuyOrder
-
-Filled market buy order. Remaining open position is represented by `availableShares`.
-
-### SellOrder
-
-Filled market sell order tied back to the original buy order.
-
-### StockAlert
-
-User threshold alert for stock price movement.
-
-## 14. Environment Variables
-
-Core variables:
+Optional/defaulted:
 
 ```text
 PORT=3000
-MONGO_URI=mongodb://mongodb:27017/eurisko_db?replicaSet=rs0
-REDIS_HOST=redis
+REDIS_HOST=localhost
 REDIS_PORT=6379
-JWT_SECRET=change-me
+RABBITMQ_URL=amqp://localhost:5672
+RABBITMQ_PREFETCH=20
+STOCK_CATALOGUE_CACHE_TTL_SECONDS=300
+STOCK_PRICE_CACHE_TTL_SECONDS=60
+PORTFOLIO_SUMMARY_CACHE_TTL_SECONDS=60
 EMAIL=
 EMAIL_PASS=
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-RABBITMQ_URL=amqp://rabbitmq:5672
-RABBITMQ_PREFETCH=20
 ```
 
-Docker Compose also supports container and host port overrides:
+Docker Compose also supports these override variables:
 
 ```text
-APP_CONTAINER_NAME=
-APP_HOST_PORT=
-MONGO_CONTAINER_NAME=
-MONGO_HOST_PORT=
-REDIS_CONTAINER_NAME=
-REDIS_HOST_PORT=
-RABBITMQ_CONTAINER_NAME=
-RABBITMQ_HOST_PORT=
-RABBITMQ_MANAGEMENT_HOST_PORT=
+APP_CONTAINER_NAME
+APP_HOST_PORT
+MONGO_CONTAINER_NAME
+MONGO_HOST_PORT
+REDIS_CONTAINER_NAME
+REDIS_HOST_PORT
+RABBITMQ_CONTAINER_NAME
+RABBITMQ_HOST_PORT
+RABBITMQ_MANAGEMENT_HOST_PORT
 ```
 
-Note: `.env.example` currently lists the main app, Mongo, Redis, email, JWT, and Stripe variables, but does not list the RabbitMQ override variables that are used by `docker-compose.yml`.
+Important: `.env.example` currently does not list RabbitMQ variables, but `docker-compose.yml` uses them.
 
-## 15. Running The Project
+## Docker
 
-Install dependencies:
+Files:
 
-```bash
-npm install
+- `Dockerfile`
+- `docker-compose.yml`
+- `.dockerignore`
+
+### Dockerfile
+
+The Dockerfile:
+
+1. starts from `node:20`
+2. sets `/app` as workdir
+3. copies `package*.json`
+4. runs `npm ci`
+5. copies the rest of the repo
+6. exposes port `3000`
+7. defaults to `npm run start:dev`
+
+### Docker Compose Services
+
+`docker-compose.yml` starts four services.
+
+#### app
+
+This is the NestJS app.
+
+- builds from the local Dockerfile
+- maps `${APP_HOST_PORT:-3000}` to `${PORT:-3000}`
+- depends on MongoDB, Redis, and RabbitMQ
+- injects env vars into the container
+- mounts the project into `/app`
+- keeps `/app/node_modules` as a container volume
+- runs `npm run start:dev`
+
+Because the source folder is mounted, local code changes are visible inside the container.
+
+#### mongodb
+
+MongoDB service.
+
+- image: `mongo:latest`
+- runs as single node replica set `rs0`
+- maps host `${MONGO_HOST_PORT:-27019}` to container `27017`
+- persists data in `mongo_data`
+- healthcheck also initializes the replica set if needed
+
+The replica set matters because Mongo transactions need it.
+
+#### redis
+
+Redis service.
+
+- image: `redis:latest`
+- maps host `${REDIS_HOST_PORT:-6379}` to container `6379`
+- persists data in `redis_data`
+
+#### rabbitmq
+
+RabbitMQ service.
+
+- image: `rabbitmq:3-management`
+- maps AMQP `${RABBITMQ_HOST_PORT:-5672}` to `5672`
+- maps management UI `${RABBITMQ_MANAGEMENT_HOST_PORT:-15672}` to `15672`
+- healthcheck uses `rabbitmq-diagnostics ping`
+
+RabbitMQ management UI:
+
+```text
+http://localhost:15672
 ```
 
-Run locally:
+Default RabbitMQ Docker credentials are usually:
 
-```bash
-npm run start:dev
+```text
+guest / guest
 ```
 
-Run the full Docker stack:
+### Running Docker
 
 ```bash
 docker compose up --build
 ```
 
-The API defaults to:
+API:
 
 ```text
 http://localhost:3000
 ```
 
-RabbitMQ management UI defaults to:
+Stop:
 
-```text
-http://localhost:15672
+```bash
+docker compose down
+```
+
+Stop and delete volumes:
+
+```bash
+docker compose down -v
+```
+
+## Useful Commands
+
+Install:
+
+```bash
+npm install
+```
+
+Run dev:
+
+```bash
+npm run start:dev
 ```
 
 Build:
@@ -830,7 +973,7 @@ Run tests:
 npm test
 ```
 
-Run e2e tests:
+Run e2e:
 
 ```bash
 npm run test:e2e
@@ -848,77 +991,105 @@ Format:
 npm run format
 ```
 
-## 16. Docker Stack
+## Data Collections
 
-`docker-compose.yml` defines:
+Main Mongo collections/models:
 
-- `app`: NestJS API in watch mode.
-- `mongodb`: MongoDB with replica set `rs0`.
-- `redis`: Redis with persisted volume.
-- `rabbitmq`: RabbitMQ with management plugin.
+- `users`: member accounts
+- `member_account_status_logs`: CMS suspension/reinstatement history
+- `cms_accounts`: CMS/admin accounts
+- `audit_trail`: CMS audit entries, currently wallet manual adjustments
+- `wallets`: one wallet per user
+- `wallet_transactions`: completed wallet movements
+- `withdrawals_requests`: withdrawal requests
+- `stocks`: stock catalogue
+- `stock_history`: snapshots before stock updates
+- `buy_orders`: filled market buys / open positions
+- `sell_orders`: filled market sells
+- `stockalerts` or similar Mongoose default collection: stock alerts
 
-The app waits for MongoDB and RabbitMQ health checks and for Redis startup.
+## Main Flows To Understand
 
-The app container mounts the repository into `/app` and keeps container `node_modules` isolated through `/app/node_modules`.
+### New Member
 
-## 17. Testing
+```text
+register -> verify OTP -> set password -> login -> deposit money -> trade
+```
 
-The project uses Jest with `ts-jest`.
+### Deposit
 
-Current test files include unit specs for:
+```text
+deposit-session -> Stripe Checkout -> Stripe webhook -> wallet balance increases
+```
 
-- App controller
-- Auth controller/service
-- Stocks controller/service
-- Wallets controller/service
-- Orders service
-- Redis service
-- Users service
+### Buy Stock
 
-There is also an e2e test setup under `test/`.
+```text
+socket market_buy_order -> Mongo transaction -> wallet down, stock shares down, buy order created
+```
 
-## 18. Important Implementation Details
+### Sell Stock
 
-### Mongo Transactions
+```text
+socket market_sell_order -> Mongo transaction -> wallet up, stock shares up, sell order created
+```
 
-Wallet deposits, buy orders, and sell orders use Mongo transactions. This is why the Docker MongoDB service runs as a replica set.
+### Stock Price Alert
 
-### Idempotent Stripe Webhooks
+```text
+CMS updates stock price -> RabbitMQ event -> alert service checks thresholds -> email if crossed
+```
 
-Stripe checkout session IDs are saved as unique `reference_id` values on wallet transactions. Duplicate key errors are treated as already processed events.
+### Withdrawal
 
-### Portfolio Cache
+```text
+member requests withdrawal -> CMS reviews -> approved decreases wallet and records transaction
+```
 
-Portfolio summaries are cached in Redis for 60 seconds. Buy and sell orders explicitly evict the cache.
+## Things A Dev Should Watch Out For
 
-### Stock History
+- Stripe webhook needs raw body. Do not remove `rawBody: true` in `main.ts`.
+- MongoDB transactions require the Docker MongoDB replica set.
+- OTPs are logged in `AuthService`; remove/gate this before production.
+- The seeded CMS super admin is hardcoded. Change this before production.
+- Withdrawal delay is currently `0`, even though a 48-hour delay is hinted in a comment.
+- Stripe success/cancel URLs are hardcoded to `http://localhost:3001/...`.
+- WebSocket CORS is currently `origin: '*'`.
+- RabbitMQ failures are logged as warnings, so alert/event behavior can silently not work if RabbitMQ is down.
+- `.env.example` is missing RabbitMQ env vars used by Docker Compose.
+- `GET /stocks/:name` actually searches by ticker. The route param name is misleading.
 
-Stock history captures the previous version of stock records before update operations. This supports audit/history views for a stock.
+## Test Coverage
 
-### Alert Crossing Semantics
+Test files exist for:
 
-Alerts trigger only when the threshold is crossed between previous and current price. If the stock is already above or below the threshold before alert creation, it will not trigger until a future crossing event.
+- app controller
+- auth controller/service
+- users service
+- stocks controller/service
+- wallets controller/service
+- orders service
+- redis service
+- CMS guards
 
-## 19. Security And Operational Notes
+There is also an e2e setup under `test/`.
 
-- JWT secrets must be set in production.
-- Stripe webhook verification depends on `rawBody: true`.
-- Email credentials should never be committed.
-- Some stock management endpoints are currently unguarded:
-  - `POST /stocks`
-  - `PATCH /stocks/:ticker`
-- CORS for WebSockets is currently open to all origins.
-- OTPs are logged with `console.log('OTP:', otp)`, which should be removed or gated outside local development.
-- Withdrawal delay is currently disabled by `withdrawalDelayMs = 0`.
+Run:
 
-## 20. Suggested Next Improvements
+```bash
+npm test
+```
 
-- Add role-based guards for stock creation and stock updates.
-- Remove OTP logging in non-development environments.
-- Add API documentation through Swagger/OpenAPI decorators.
-- Add pagination to transaction history, stocks, alerts, and stock history.
-- Add explicit withdrawal approval/rejection admin endpoints.
-- Add RabbitMQ variables to `.env.example`.
-- Move Stripe success and cancel URLs into environment variables.
-- Add integration tests around Stripe webhook idempotency and market order transactions.
-- Replace push notification logging with a real push notification queue/provider.
+## Where To Start When Changing Things
+
+- Changing login/signup: start in `src/auth/auth.service.ts`
+- Changing member data: start in `src/users/users.service.ts`
+- Changing admin/CMS permissions: start in `src/cms/guards`
+- Changing CMS endpoints: start in `src/cms/cms.controller.ts`
+- Changing deposits/withdrawals: start in `src/wallets/wallets.service.ts`
+- Changing stocks: start in `src/stocks/stocks.service.ts`
+- Changing buy/sell behavior: start in `src/orders/orders.service.ts`
+- Changing WebSocket events: start in `src/orders/orders.gateway.ts`
+- Changing alerts: start in `src/stock-alerts/stock-alerts.service.ts`
+- Changing analytics: start in `src/analyst/analyst.service.ts`
+- Changing Docker/local infra: start in `docker-compose.yml`
